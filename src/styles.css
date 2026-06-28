@@ -284,6 +284,11 @@ button {
   color: #9ff7ef;
 }
 
+.toast.error {
+  border-color: rgba(217, 130, 145, 0.42);
+  color: #ffbec8;
+}
+
 .oc-layout {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr) 362px;

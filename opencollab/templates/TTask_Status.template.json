@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "T-0.3.0",
+  "kind": "OpenCollab Tiny Task Brief",
+  "project": {
+    "name": "Unconfigured OpenCollab Project",
+    "repo": "",
+    "statusTarget": "opencollab/Task_Status.json",
+    "cloudDocument": "",
+    "output": "Replace this template with the task brief from the target project repository.",
+    "audience": "A team using OpenCollab as a local visualizer",
+    "collaborationMode": "OpenCollab framework repo stays local; target repo stores task brief and JSON dataset."
+  },
+  "brief": {
+    "assignment": "Paste or summarize the target project task brief here during /ocb init.",
+    "finalDeliverables": [],
+    "constraints": []
+  },
+  "members": [],
+  "workPackages": [],
+  "classificationHints": [
+    "Use dependency edges when one artifact must exist before another can be accurate.",
+    "Use boundary edges when two owners touch the same concept, claim, file, or interface.",
+    "Use sync edges when active tasks need a short alignment meeting."
+  ],
+  "createdAt": "2026-06-29T00:00:00.000Z"
+}

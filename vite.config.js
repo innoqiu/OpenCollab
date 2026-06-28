@@ -4,9 +4,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { defineConfig } from "vite";
+import { ensureProjectDirs, resolveProjectConfig } from "./scripts/project-config.mjs";
 
 const execFileAsync = promisify(execFile);
-const statusPath = path.resolve("opencollab", "Task_Status.json");
 const defaultBoard = { cols: 14, rows: 12 };
 const defaultCategory = { id: "general", label: "General", color: "#7d838f" };
 
@@ -24,22 +24,31 @@ async function readBody(req) {
 }
 
 async function readStatus() {
-  const raw = await fs.readFile(statusPath, "utf8");
-  return normalizeStatus(JSON.parse(raw));
+  const config = await resolveProjectConfig();
+  const readableStatusPath = config.usingFallbackStatus ? config.fallbackStatusPath : config.statusPath;
+  const raw = await fs.readFile(readableStatusPath, "utf8");
+  return { status: normalizeStatus(JSON.parse(raw)), meta: projectMeta(config) };
 }
 
 async function writeStatus(status) {
+  const config = await resolveProjectConfig();
+  if (config.usingFallbackStatus && !config.hasLocalConfig) {
+    throw new Error("No target project is configured. Run npm run ocb -- def --project-dir=<target-repo> first.");
+  }
+  await ensureProjectDirs(config);
   const normalized = normalizeStatus(status);
   const next = {
     ...normalized,
     workspace: {
       ...normalized.workspace,
+      repo: config.repo || normalized.workspace?.repo || "",
+      statusFile: config.statusFile,
       updatedAt: new Date().toISOString()
     },
     conflicts: analyzeConflicts(normalized)
   };
-  await fs.writeFile(statusPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  return next;
+  await fs.writeFile(config.statusPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return { status: next, meta: projectMeta(config) };
 }
 
 function normalizeStatus(status) {
@@ -239,12 +248,42 @@ function appendPushUpdate(status) {
   };
 }
 
-async function runGit(args) {
+async function runGit(args, config) {
   const { stdout, stderr } = await execFileAsync("git", args, {
-    cwd: process.cwd(),
+    cwd: config.projectRoot,
     timeout: 30000
   });
   return { stdout, stderr };
+}
+
+function projectMeta(config) {
+  return {
+    projectRoot: config.projectRoot,
+    repo: config.repo,
+    source: config.source,
+    statusFile: config.statusFile,
+    statusPath: config.statusPath,
+    briefFile: config.briefFile,
+    briefPath: config.briefPath,
+    usingFallbackStatus: config.usingFallbackStatus,
+    hasLocalConfig: config.hasLocalConfig
+  };
+}
+
+async function collectJsonDataset(config) {
+  const files = new Set();
+  files.add(path.relative(config.projectRoot, config.statusPath).replace(/\\/g, "/"));
+  const dataDir = path.join(config.projectRoot, "opencollab");
+  try {
+    for (const entry of await fs.readdir(dataDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".json")) {
+        files.add(path.posix.join("opencollab", entry.name));
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return [...files].filter(Boolean);
 }
 
 function localApiPlugin() {
@@ -261,35 +300,47 @@ function localApiPlugin() {
           const url = new URL(req.url, "http://localhost");
 
           if (req.method === "GET" && url.pathname === "/api/status") {
-            json(res, 200, await readStatus());
+            const { status, meta } = await readStatus();
+            json(res, 200, { status, meta });
+            return;
+          }
+
+          if (req.method === "GET" && url.pathname === "/api/project") {
+            const config = await resolveProjectConfig();
+            json(res, 200, { ok: true, meta: projectMeta(config) });
             return;
           }
 
           if (req.method === "PUT" && url.pathname === "/api/status") {
             const body = await readBody(req);
             const saved = await writeStatus(body.status ?? body);
-            json(res, 200, { ok: true, status: saved });
+            json(res, 200, { ok: true, status: saved.status, meta: saved.meta });
             return;
           }
 
           if (req.method === "POST" && url.pathname === "/api/git/pull") {
-            const result = await runGit(["pull", "--ff-only"]);
-            json(res, 200, { ok: true, result, status: await readStatus() });
+            const config = await resolveProjectConfig();
+            const result = await runGit(["pull", "--ff-only"], config);
+            const { status, meta } = await readStatus();
+            json(res, 200, { ok: true, result, status, meta });
             return;
           }
 
           if (req.method === "POST" && url.pathname === "/api/git/push") {
+            const config = await resolveProjectConfig();
             const body = await readBody(req);
-            const draft = body.status ?? (await readStatus());
+            const currentRead = await readStatus();
+            const draft = body.status ?? currentRead.status;
             const current = await writeStatus(appendPushUpdate(draft));
-            await runGit(["add", "opencollab/Task_Status.json", "opencollab/AGENT.md", "opencollab/Task_Status.schema.json"]);
-            const diff = await runGit(["diff", "--cached", "--quiet"]).catch((error) => error);
+            const jsonDataset = await collectJsonDataset(config);
+            if (jsonDataset.length) await runGit(["add", ...jsonDataset], config);
+            const diff = await runGit(["diff", "--cached", "--quiet"], config).catch((error) => error);
             let commit = { stdout: "", stderr: "No staged changes to commit." };
             if (diff?.code === 1) {
-              commit = await runGit(["commit", "-m", "Update OpenCollab task status"]);
+              commit = await runGit(["commit", "-m", "Update OpenCollab task status dataset"], config);
             }
-            const push = await runGit(["push"]);
-            json(res, 200, { ok: true, status: current, commit, push });
+            const push = await runGit(["push"], config);
+            json(res, 200, { ok: true, status: current.status, meta: current.meta, commit, push, files: jsonDataset });
             return;
           }
 

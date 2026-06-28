@@ -1,113 +1,112 @@
 # OpenCollab
 
-OpenCollab is a local-first task collaboration mockup. A local visual system reads and
-writes `opencollab/Task_Status.json`; teammates keep that JSON synchronized through
-GitHub; local agents read the same file to initialize task maps, update task progress,
-detect conflicts, and prepare pushes.
+OpenCollab is a local-first visualization and agent protocol for lightweight
+team task coordination. This repository is the **tool repo**: it contains the
+visual board, prompts, schemas, and `/ocb` protocol documents.
 
-The current demo is a four-person course project: **Campus Study Space Finder**.
-It models research, data, prototype, and evaluation/reporting work for a small
-team assignment.
+The actual project state should live in a separate **target task repo**. That
+target repo can stay small: a task brief plus an `opencollab/` folder containing
+JSON status files.
 
-## Current architecture
+## Intended Workflow
 
 ```text
-GitHub repo
-  |
-  | git pull / git push
-  v
-opencollab/Task_Status.json  <->  localhost:5173 local API  <->  React pixel board UI
+target task repo on GitHub
+  TASK_BRIEF.md
+  opencollab/*.json
         ^
+        | git pull / git push JSON dataset only
         |
-        local agent reads AGENT.md and updates JSON during /ocb init or /ocb push
+local OpenCollab tool repo
+  localhost visualizer
+  agent protocol documents
 ```
 
-## Run locally
+1. A team uploads a task brief to a GitHub repo.
+2. Teammates clone or pull this OpenCollab tool repo locally.
+3. One person opens OpenCollab in a local agent and types `/ocb init`, giving
+   the task brief GitHub link and a local target folder.
+4. The agent reads the brief, creates task interfaces, writes the JSON dataset
+   into the target repo, and starts the visual board.
+5. The team claims tasks and edits the board locally.
+6. `/ocb push` commits and pushes only the target repo's OpenCollab JSON dataset.
+7. Later teammates pull the same target repo JSON dataset and visualize it with
+   their own local OpenCollab copy.
 
-Install once:
+## Setup
+
+Install once in this tool repo:
 
 ```bash
 npm install
 ```
 
-Start the local service and visual UI:
+Configure a target task repo folder:
 
 ```bash
-npm run dev
+npm run ocb -- def --project-dir=../DemoOpenColl2 --repo=innoqiu/DemoOpenColl2 --brief=TASK_BRIEF.md --actor=mira --signature=MI --color=#65b8a6
+```
+
+Start the local visualizer for the configured target:
+
+```bash
+npm run ocb -- init
 ```
 
 Open:
 
 [http://localhost:5173](http://localhost:5173)
 
-## UI workflow
+If `5173` is busy, Vite will print the next available local URL.
 
-- `Refresh`: re-read `opencollab/Task_Status.json` from disk.
-- `Sync`: write current panel edits back to `Task_Status.json`.
-- `Git Pull`: run `git pull --ff-only`, then reload JSON.
-- `Git Push`: writes JSON, stages OpenCollab files, commits, and runs `git push`.
-- Click a square node to inspect it.
-- Empty grid positions open a manual task form at that board position.
-- Dragging a task onto another task opens an `Add interdependence` dialog instead of overlapping them.
-- `Claim` assigns the selected node to the current actor.
-- The progress slider writes `tasks[].progress`; node opacity follows that progress value.
-- Selecting a node highlights strongly related task interfaces instead of drawing dashed links.
-- Clicking a conflict in the inspector highlights the affected task nodes.
-- The member manager in the inspector selects, adds, edits, colors, and deletes actors.
-- The small `+` at the top of the timeline opens a focused meeting-note dialog.
-
-## Agent commands
+## Agent Commands
 
 `/ocb` is a protocol command typed inside an agent conversation. It is not a
-native shell slash command. The repository ships agent entry files so downloaded
-projects can teach local agents how to handle `/ocb`:
+native shell slash command. The helper script `npm run ocb -- <action>` only
+performs mechanical local steps after the agent has read the protocol.
 
-- [AGENTS.md](AGENTS.md): Codex/project-level entry.
-- [CLAUDE.md](CLAUDE.md): Claude Code memory entry.
-- [.claude/commands/ocb.md](.claude/commands/ocb.md): Claude Code slash command wrapper.
-- [opencollab/AGENT.md](opencollab/AGENT.md): canonical OpenCollab agent protocol.
-- [opencollab/PROTOCOL_COMMANDS.md](opencollab/PROTOCOL_COMMANDS.md): command behavior spec.
+- `/ocb def`: configure the target task repo folder, repo URL, current actor,
+  and status file.
+- `/ocb init`: read the task brief from the target repo or GitHub link, create
+  or refresh the JSON dataset, then start the visual board.
+- `/ocb pull`: run `git pull --ff-only` inside the target task repo and reload
+  the configured JSON dataset.
+- `/ocb push`: review local changes, update the configured JSON dataset, commit
+  `opencollab/*.json` inside the target task repo, and push that target repo.
+- `/ocb mtg`: add a meeting note to the configured JSON dataset.
 
-When a user types `/ocb push` in Codex or Claude, the agent should read those
-files, inspect local work, update `Task_Status.json`, and then commit/push. The
-helper script below can perform mechanical steps, but it does not replace the
-agent's review.
+Codex should start from [AGENTS.md](AGENTS.md). Claude Code should start from
+[CLAUDE.md](CLAUDE.md) or [.claude/commands/ocb.md](.claude/commands/ocb.md).
+The canonical command behavior is in
+[opencollab/PROTOCOL_COMMANDS.md](opencollab/PROTOCOL_COMMANDS.md).
 
-- `/ocb def`: initialize repo, workspace, actor signature, and actor color.
-- `/ocb init`: initialize a task map from a task brief and cloud document, then start the visual system.
-- `/ocb run`: compatibility alias for `/ocb init` during the demo period.
-- `/ocb pull`: pull latest GitHub state.
-- `/ocb push`: review today's local work, update JSON, check conflicts, commit, and push.
+## UI Workflow
 
-A small helper is also available:
+- `Refresh`: re-read the configured target project's `Task_Status.json`.
+- `Sync`: write panel edits back to the configured target JSON file.
+- `Pull JSON`: run `git pull --ff-only` in the target repo, then reload JSON.
+- `Push JSON`: commit and push only the target repo's OpenCollab JSON dataset.
+- Click a square node to inspect it.
+- Empty grid positions open a manual task form at that board position.
+- Dragging a task onto another task opens an `Add interdependence` dialog.
+- `Claim` assigns the selected node to the current actor.
+- The progress slider writes `tasks[].progress`; node opacity follows progress.
+- Selecting a node highlights strongly related task interfaces.
+- Clicking a conflict highlights the affected task nodes.
+- The small `+` at the top of the timeline opens a meeting-note dialog.
 
-```bash
-npm run ocb -- help
-npm run ocb -- def --repo=innoqiu/OpenCollab --workspace="OpenCollab Local Mockup" --actor=iq --signature=IQ --color=#29d8d0
-npm run ocb -- init
-npm run ocb -- pull
-npm run ocb -- push
-```
+## Tool Repo Files
 
-## Install the agent entry in another repo
+- `src/`: React visual board.
+- `vite.config.js`: local API that reads/writes the configured target JSON.
+- `scripts/ocb.mjs`: helper for target repo configuration, pull, push, and dev server startup.
+- `scripts/project-config.mjs`: local target project resolver.
+- `opencollab/Task_Status.schema.json`: JSON schema for target status files.
+- `opencollab/templates/`: starter JSON templates for agents.
+- `opencollab/AGENT.md`: canonical local-agent protocol.
+- `opencollab/PROTOCOL_COMMANDS.md`: `/ocb` command contract.
+- `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`: task interface and conflict framework.
+- `opencollab/PROMPTS.md`: structured prompt library.
 
-From this repository, copy the OpenCollab agent entry into another local project:
-
-```bash
-npm run agent:install -- --target=../DemoOpenColl
-```
-
-This installs `AGENTS.md`, `CLAUDE.md`, `.claude/commands/ocb.md`, and the
-canonical OpenCollab protocol documents. The target project still needs its own
-`opencollab/Task_Status.json`; after that, open the target repo in Codex or
-Claude and type `/ocb init`.
-
-## Data files
-
-- `opencollab/Task_Status.json`: source of truth for board view, members, categories, tasks, progress, links, timeline, meetings, and conflicts.
-- `opencollab/Task_Status.schema.json`: schema used by agents and future validators.
-- `opencollab/AGENT.md`: local-agent command and JSON update protocol.
-- `opencollab/PROTOCOL_COMMANDS.md`: agent-facing `/ocb` command contract.
-- `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`: general framework for task interdependence and conflict.
-- `opencollab/PROMPTS.md`: structured prompt library for init, task analysis, interdependence, conflict, pull, push, and meetings.
-- `opencollab/interfaces/README.md`: task interface and boundary contract conventions.
+The local target pointer is stored in `.opencollab/current-project.json` and is
+ignored by Git.

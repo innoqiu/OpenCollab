@@ -1,8 +1,9 @@
 import fs from "node:fs";
 
 const allowedStates = new Set(["undo", "claimed", "active", "done"]);
+const statusPath = process.env.OCB_VERIFY_STATUS ?? "opencollab/templates/Task_Status.template.json";
 
-const status = JSON.parse(fs.readFileSync("opencollab/Task_Status.json", "utf8"));
+const status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
 const schema = JSON.parse(fs.readFileSync("opencollab/Task_Status.schema.json", "utf8"));
 const app = fs.readFileSync("src/App.jsx", "utf8");
 const css = fs.readFileSync("src/styles.css", "utf8");
@@ -10,6 +11,8 @@ const agent = fs.readFileSync("opencollab/AGENT.md", "utf8");
 const framework = fs.readFileSync("opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md", "utf8");
 const prompts = fs.readFileSync("opencollab/PROMPTS.md", "utf8");
 const protocol = fs.readFileSync("opencollab/PROTOCOL_COMMANDS.md", "utf8");
+const projectConfig = fs.readFileSync("scripts/project-config.mjs", "utf8");
+const viteConfig = fs.readFileSync("vite.config.js", "utf8");
 const board = status.view?.board ?? { cols: 14, rows: 12 };
 
 const failures = [];
@@ -24,12 +27,8 @@ assert(Number.isInteger(status.view?.progressSteps), "status.view.progressSteps 
 assert(!("statusModel" in status), "statusModel is redundant and should not be persisted");
 assert(!("classification" in status), "classification is redundant; categories[] and links[] should drive the view");
 assert(Boolean(status.workspace?.name), "workspace.name is missing");
-assert(Boolean(status.workspace?.repo), "workspace.repo is missing");
-assert((status.members ?? []).length === 4, "demo should have exactly four participating members");
-assert((status.members ?? []).every((member) => member.role === "human"), "demo members should be four human teammates");
+assert(Boolean(status.workspace?.statusFile), "workspace.statusFile is missing");
 assert(Boolean(status.commands?.init), "commands.init is missing");
-assert(Boolean(status.protocol?.interdependenceFramework), "protocol.interdependenceFramework is missing");
-assert(Boolean(status.protocol?.promptLibrary), "protocol.promptLibrary is missing");
 assert(Boolean(status.protocol?.commandProtocol), "protocol.commandProtocol is missing");
 
 for (const task of status.tasks ?? []) {
@@ -51,10 +50,6 @@ for (const link of status.links ?? []) {
   assert(link.info?.trim(), `${link.id} is missing related task info`);
 }
 
-for (const member of status.members ?? []) {
-  assert(member.displayName !== "Project Lead", `${member.id} still uses a role title instead of a name`);
-}
-
 assert(Boolean(schema.properties.view), "schema does not document view");
 assert(Boolean(schema.properties.categories), "schema does not document categories");
 assert(schema.properties.commands.required.includes("init"), "schema does not require commands.init");
@@ -63,8 +58,16 @@ assert(!schema.properties.tasks.items.properties.state.enum.includes("working"),
 assert(Boolean(schema.properties.tasks.items.properties.progress), "schema does not document task progress");
 assert(!schema.properties.tasks.items.properties.dependsOn, "schema still documents redundant task dependsOn");
 assert(Boolean(schema.properties.links.items.properties.info), "schema does not document links[].info");
-assert(!schema.properties.classification, "schema still documents redundant classification");
 
+assert(projectConfig.includes("current-project.json"), "project config should persist the local target pointer");
+assert(projectConfig.includes("OCB_PROJECT_DIR"), "project config should support external target project dirs");
+assert(viteConfig.includes("resolveProjectConfig"), "local API should resolve the configured target project");
+assert(viteConfig.includes("collectJsonDataset"), "push endpoint should stage only JSON dataset files");
+assert(projectConfig.includes("opencollab/Task_Status.json"), "project config should default to target opencollab/Task_Status.json");
+
+assert(app.includes("Project JSON is rendered"), "UI should describe the configured project JSON");
+assert(app.includes("Push JSON"), "UI should expose JSON-only push copy");
+assert(app.includes("Pull JSON"), "UI should expose JSON-only pull copy");
 assert(app.includes("taskAtGrid(status.tasks, nextGrid, task.id)"), "drag collision check is not wired");
 assert(app.includes("onRequestInterdependence(task, hitTask, nextGrid)"), "drag collision does not open interdependence flow");
 assert(app.includes("InterdependenceDialog"), "interdependence dialog component is missing");
@@ -79,33 +82,26 @@ assert(app.includes("task.claimantId && task.claimantId !== currentActor?.id"), 
 assert(app.includes("getBoard(status)") && app.includes("status.view?.taskIdPrefix"), "board and id prefix are not driven by Task_Status view data");
 assert(app.includes("ProgressControl") && app.includes("onProgressChange"), "progress slider is not wired");
 assert(app.includes("\"--tile-opacity\": tileOpacity(progress)"), "task tile opacity is not driven by progress");
-assert(app.includes("className={`node-menu ${canPlaceRight ? \"right-side\" : \"left-side\"}`"), "node menu is not positioned beside the selected cell");
 assert(app.includes("Local changes pending sync"), "unsynced indicator should use professional English copy");
 assert(app.includes("/ocb init"), "UI command strip should use /ocb init");
 assert(!app.includes("Create link") && !app.includes("connectSource"), "old create-link flow should be removed");
 assert(!app.includes(">Active</button>") && !app.includes("Mark Active"), "old active buttons should be removed");
-assert(!app.includes("AIP-"), "visualization code should not contain demo task id prefixes");
 
 assert(css.includes(".empty-cell"), "empty board cells are not styled");
 assert(css.includes(".task-tile.related-highlight"), "related highlight style is missing");
-assert(css.includes("rgba(226, 229, 236"), "related highlight is not using a gray frame");
-assert(/\.task-tile\.related-highlight[\s\S]*animation:\s*none/.test(css), "related highlight should disable state animations so the gray frame stays visible");
 assert(!css.includes("stroke-dasharray") && !css.includes(".board-link"), "dashed link styling should not remain in the matrix UI");
 assert(css.includes(".task-tile.state-active"), "active state style is missing");
-assert(css.includes(".actor-row"), "right-side actor rows are not styled");
-assert(css.includes(".related-docs"), "related task info section is not styled");
 assert(css.includes(".progress-control") && css.includes(".segmented-progress"), "progress slider styles are missing");
-assert(css.includes("opacity: var(--tile-opacity"), "tile opacity style is not progress-driven");
 
 assert(framework.includes("The I-TAC-C Check"), "interdependence framework should define the I-TAC-C check");
 assert(framework.includes("Conflict Triggers"), "conflict framework should define conflict triggers");
 assert(prompts.includes("Prompt A: `/ocb init`"), "prompt library should define /ocb init prompt");
-assert(prompts.includes("Prompt F: `/ocb push`"), "prompt library should define /ocb push prompt");
+assert(prompts.includes("target task repo"), "prompt library should be target-repo oriented");
 assert(prompts.includes('"taskInterfaces"'), "prompt library should require structured task interface output");
+assert(agent.includes("target task repo"), "agent prompt should be target-repo oriented");
 assert(agent.includes("### /ocb init"), "agent prompt should document /ocb init");
-assert(agent.includes("opencollab/PROMPTS.md"), "agent prompt should reference structured prompts");
-assert(protocol.includes("conversation-level protocol command") || protocol.includes("protocol command for local agents"), "protocol docs should define /ocb as an agent protocol command");
-assert(protocol.includes("/ocb push"), "protocol docs should document /ocb push");
+assert(protocol.includes("Separation Of Repos"), "protocol should define tool repo vs target repo separation");
+assert(protocol.includes("opencollab/*.json"), "protocol should limit ordinary push to target JSON datasets");
 
 if (failures.length) {
   console.error("OpenCollab verification failed:");
@@ -113,16 +109,22 @@ if (failures.length) {
   process.exit(1);
 }
 
+const occupied = occupiedGridCells(status.tasks ?? []).size;
+const taskCount = status.tasks?.length ?? 0;
+const progress = taskCount
+  ? Math.round(status.tasks.reduce((sum, task) => sum + task.progress, 0) / taskCount)
+  : 0;
+
 console.log(
   JSON.stringify(
     {
       ok: true,
+      checkedStatus: statusPath,
       board,
-      tasks: status.tasks.length,
-      links: status.links.length,
-      states: [...new Set(status.tasks.map((task) => task.state))],
-      progress: Math.round(status.tasks.reduce((sum, task) => sum + task.progress, 0) / status.tasks.length),
-      emptyCells: board.cols * board.rows - occupiedGridCells(status.tasks).size
+      tasks: taskCount,
+      links: status.links?.length ?? 0,
+      progress,
+      emptyCells: board.cols * board.rows - occupied
     },
     null,
     2

@@ -27,8 +27,8 @@ const files = [
 ];
 
 if (includeSampleStatus) {
-  files.push(["opencollab/TTask_Status.json", "opencollab/TTask_Status.json"]);
-  files.push(["opencollab/Task_Status.json", "opencollab/Task_Status.json"]);
+  files.push(["opencollab/templates/TTask_Status.template.json", "opencollab/TTask_Status.json"]);
+  files.push(["opencollab/templates/Task_Status.template.json", "opencollab/Task_Status.json"]);
 }
 
 const installed = [];

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "0.6.0",
+  "workspace": {
+    "name": "Unconfigured OpenCollab Project",
+    "repo": "",
+    "branch": "main",
+    "locked": false,
+    "statusFile": "opencollab/Task_Status.json",
+    "currentActorId": "agent",
+    "updatedAt": "2026-06-29T00:00:00.000Z"
+  },
+  "commands": {
+    "def": "/ocb def --project-dir <local-target-repo> --repo <owner/repo> --actor <id>",
+    "init": "/ocb init --project-dir <local-target-repo> --source <task-brief-github-url>",
+    "run": "/ocb run  # compatibility alias for /ocb init during the demo period",
+    "pull": "/ocb pull",
+    "push": "/ocb push",
+    "mtg": "/ocb mtg --title <meeting> --task <taskId> --notes <text>"
+  },
+  "protocol": {
+    "cloudDocument": "",
+    "commandProtocol": "opencollab/PROTOCOL_COMMANDS.md",
+    "interdependenceFramework": "opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
+    "promptLibrary": "opencollab/PROMPTS.md",
+    "agentEntryFiles": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      ".claude/commands/ocb.md"
+    ],
+    "initSummary": "Configure OpenCollab to a target project repository, then create task interfaces from that repository's task brief."
+  },
+  "taskBrief": {
+    "path": "TASK_BRIEF.md",
+    "cloudDocument": "",
+    "firstReadOrder": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "opencollab/PROTOCOL_COMMANDS.md",
+      "target:TASK_BRIEF.md",
+      "target:opencollab/TTask_Status.json",
+      "target:opencollab/Task_Status.json",
+      "opencollab/Task_Status.schema.json",
+      "opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
+      "opencollab/PROMPTS.md",
+      "opencollab/AGENT.md",
+      "README.md"
+    ],
+    "lastReviewedAt": "2026-06-29T00:00:00.000Z"
+  },
+  "members": [
+    {
+      "id": "agent",
+      "displayName": "Local Agent",
+      "signature": "AI",
+      "color": "#9aa0ad",
+      "role": "agent",
+      "active": true
+    }
+  ],
+  "categories": [
+    {
+      "id": "general",
+      "label": "General",
+      "color": "#9aa0ad"
+    }
+  ],
+  "tasks": [],
+  "links": [],
+  "timeline": [],
+  "meetings": [],
+  "conflicts": [],
+  "view": {
+    "board": {
+      "cols": 14,
+      "rows": 12
+    },
+    "taskIdPrefix": "OCB",
+    "progressSteps": 24
+  }
+}

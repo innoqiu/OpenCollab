@@ -1,76 +1,105 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ensureProjectDirs, exists, resolveProjectConfig, saveProjectConfig } from "./project-config.mjs";
 
-const statusPath = path.resolve("opencollab", "Task_Status.json");
 const defaultBoard = { cols: 14, rows: 12 };
 const defaultCategory = { id: "general", label: "General", color: "#7d838f" };
 const command = process.argv[2] ?? "help";
 const args = Object.fromEntries(
   process.argv.slice(3).map((arg) => {
     const [key, ...value] = arg.replace(/^--/, "").split("=");
-    return [key, value.join("=") || "true"];
+    return [toCamel(key), value.join("=") || "true"];
   })
 );
 
 if (command === "help") {
-  console.log("OpenCollab helper commands: def, init, run, pull, push, mtg");
-  console.log("Use /ocb inside an agent conversation; use this helper for mechanical local steps.");
+  console.log("OpenCollab helper commands: def, init, run, pull, push, mtg, status");
+  console.log("Use /ocb inside an agent conversation; this helper only performs mechanical local steps.");
+  console.log("Target project data lives outside this framework repo by default.");
+  process.exit(0);
+}
+
+if (command === "status") {
+  const config = await resolveProjectConfig(args);
+  console.log(JSON.stringify(projectSummary(config), null, 2));
+  process.exit(0);
+}
+
+if (command === "def") {
+  const config = await configureTarget(args);
+  if (await exists(config.statusPath)) {
+    const status = normalizeStatus(JSON.parse(await fs.readFile(config.statusPath, "utf8")));
+    const actorId = args.actor ?? status.workspace.currentActorId;
+    const signature = args.signature ?? actorId.slice(0, 2).toUpperCase();
+    const color = args.color ?? "#29d8d0";
+    const displayName = args.name ?? actorId;
+
+    const member = {
+      id: actorId,
+      displayName,
+      signature,
+      color,
+      role: actorId === "agent" || actorId === "ai" ? "agent" : "human",
+      active: true
+    };
+
+    status.workspace = {
+      ...status.workspace,
+      repo: config.repo || args.repo || status.workspace.repo,
+      name: args.workspace ?? status.workspace.name,
+      currentActorId: actorId,
+      locked: true,
+      statusFile: config.statusFile,
+      updatedAt: new Date().toISOString()
+    };
+
+    const existing = status.members.findIndex((item) => item.id === actorId);
+    if (existing >= 0) status.members[existing] = { ...status.members[existing], ...member };
+    else status.members.push(member);
+
+    await writeStatus(config, status);
+    console.log(`Defined OpenCollab target and actor ${signature}.`);
+  } else {
+    await ensureProjectDirs(config);
+    console.log("Defined OpenCollab target project. Task_Status.json does not exist yet; create it during /ocb init.");
+  }
   process.exit(0);
 }
 
 if (command === "init" || command === "run") {
-  await run("npm", ["run", "dev"], { inherit: true });
+  const config = await configureTarget(args);
+  console.log(`OpenCollab target project: ${config.projectRoot}`);
+  console.log(`OpenCollab status file: ${config.statusPath}`);
+  await run("npm", ["run", "dev"], { inherit: true, cwd: process.cwd() });
+  process.exit(0);
 }
 
 if (command === "pull") {
-  await run("git", ["pull", "--ff-only"], { inherit: true });
+  const config = await resolveProjectConfig(args);
+  await run("git", ["pull", "--ff-only"], { inherit: true, cwd: config.projectRoot });
+  process.exit(0);
 }
 
 if (command === "push") {
-  const status = normalizeStatus(JSON.parse(await fs.readFile(statusPath, "utf8")));
+  const config = await resolveProjectConfig(args);
+  const status = normalizeStatus(JSON.parse(await fs.readFile(config.statusPath, "utf8")));
   appendPushUpdate(status);
-  await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
-  await run("git", ["add", "AGENTS.md", "CLAUDE.md", ".claude/commands/ocb.md", "opencollab/Task_Status.json", "opencollab/AGENT.md", "opencollab/PROTOCOL_COMMANDS.md", "opencollab/Task_Status.schema.json", "opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md", "opencollab/PROMPTS.md"], { inherit: true });
-  await run("git", ["commit", "-m", "Update OpenCollab task status"], { inherit: true, allowFailure: true });
-  await run("git", ["push"], { inherit: true });
-}
-
-if (command === "def") {
-  const status = normalizeStatus(JSON.parse(await fs.readFile(statusPath, "utf8")));
-  const actorId = args.actor ?? status.workspace.currentActorId;
-  const signature = args.signature ?? actorId.slice(0, 2).toUpperCase();
-  const color = args.color ?? "#29d8d0";
-  const displayName = args.name ?? actorId;
-
-  const member = {
-    id: actorId,
-    displayName,
-    signature,
-    color,
-    role: actorId === "agent" || actorId === "ai" ? "agent" : "human",
-    active: true
-  };
-
-  status.workspace = {
-    ...status.workspace,
-    repo: args.repo ?? status.workspace.repo,
-    name: args.workspace ?? status.workspace.name,
-    currentActorId: actorId,
-    locked: true,
-    updatedAt: new Date().toISOString()
-  };
-
-  const existing = status.members.findIndex((item) => item.id === actorId);
-  if (existing >= 0) status.members[existing] = { ...status.members[existing], ...member };
-  else status.members.push(member);
-
-  await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
-  console.log(`Defined OpenCollab workspace for ${signature}.`);
+  await writeStatus(config, status);
+  const jsonDataset = await collectJsonDataset(config);
+  if (jsonDataset.length) await run("git", ["add", ...jsonDataset], { inherit: true, cwd: config.projectRoot });
+  await run("git", ["commit", "-m", "Update OpenCollab task status dataset"], {
+    inherit: true,
+    allowFailure: true,
+    cwd: config.projectRoot
+  });
+  await run("git", ["push"], { inherit: true, cwd: config.projectRoot });
+  process.exit(0);
 }
 
 if (command === "mtg") {
-  const status = normalizeStatus(JSON.parse(await fs.readFile(statusPath, "utf8")));
+  const config = await resolveProjectConfig(args);
+  const status = normalizeStatus(JSON.parse(await fs.readFile(config.statusPath, "utf8")));
   const actorId = args.actor ?? status.workspace.currentActorId;
   const taskIds = String(args.task ?? args.tasks ?? "")
     .split(",")
@@ -100,8 +129,53 @@ if (command === "mtg") {
     ...(status.timeline ?? [])
   ];
   status.workspace.updatedAt = new Date().toISOString();
-  await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
+  await writeStatus(config, status);
   console.log(`Added meeting marker: ${title}`);
+  process.exit(0);
+}
+
+console.error(`Unknown OpenCollab helper command: ${command}`);
+process.exit(1);
+
+async function configureTarget(options) {
+  const config = await resolveProjectConfig(options);
+  await ensureProjectDirs(config);
+  await saveProjectConfig(config);
+  return config;
+}
+
+async function writeStatus(config, status) {
+  await ensureProjectDirs(config);
+  await fs.writeFile(config.statusPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
+}
+
+async function collectJsonDataset(config) {
+  const files = new Set();
+  files.add(path.relative(config.projectRoot, config.statusPath).replace(/\\/g, "/"));
+  const dataDir = path.join(config.projectRoot, "opencollab");
+  try {
+    for (const entry of await fs.readdir(dataDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".json")) {
+        files.add(path.posix.join("opencollab", entry.name));
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return [...files].filter(Boolean);
+}
+
+function projectSummary(config) {
+  return {
+    projectRoot: config.projectRoot,
+    repo: config.repo,
+    source: config.source,
+    briefFile: config.briefFile,
+    briefPath: config.briefPath,
+    statusFile: config.statusFile,
+    statusPath: config.statusPath,
+    usingFallbackStatus: config.usingFallbackStatus
+  };
 }
 
 function appendPushUpdate(status) {
@@ -210,10 +284,14 @@ function inferTaskPrefix(tasks) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "OCB";
 }
 
+function toCamel(key) {
+  return key.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
 function run(cmd, cmdArgs, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, cmdArgs, {
-      cwd: process.cwd(),
+      cwd: options.cwd ?? process.cwd(),
       shell: process.platform === "win32",
       stdio: options.inherit ? "inherit" : "pipe"
     });

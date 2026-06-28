@@ -1,35 +1,38 @@
 # OpenCollab Structured Prompt Library
 
-These prompts are written for local coding or writing agents that can read files,
-inspect Git state, edit `opencollab/Task_Status.json`, and run the OpenCollab
-local visual system.
+These prompts are written for local coding or writing agents that can read this
+OpenCollab tool repo, inspect the configured target task repo, edit the target
+repo's `opencollab/Task_Status.json`, and run the OpenCollab local visual
+system.
 
 All prompts assume the agent has first read:
 
 1. `AGENTS.md` or `CLAUDE.md` when present
 2. `opencollab/PROTOCOL_COMMANDS.md`
-3. `opencollab/TTask_Status.json`
-4. `opencollab/Task_Status.json`
-5. `opencollab/Task_Status.schema.json`
-6. `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`
-7. `opencollab/PROMPTS.md`
-8. `opencollab/AGENT.md`
-9. `README.md`
+3. `opencollab/Task_Status.schema.json`
+4. `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`
+5. `opencollab/PROMPTS.md`
+6. `opencollab/AGENT.md`
+7. `README.md`
+8. the target task brief
+9. target `opencollab/Task_Status.json` if it exists
 
 ## Prompt A: `/ocb init`
 
-Use when the user defines a task and a cloud document or repository address.
+Use when the user gives a target task repo and a task brief URL or file.
 
 ```text
 You are initializing an OpenCollab project.
 
 Inputs:
 - user task brief: {{TASK_BRIEF}}
-- cloud document or repo URL: {{CLOUD_DOC_URL}}
-- local status target: opencollab/Task_Status.json
+- target task repo: {{TARGET_REPO}}
+- task brief URL or local path: {{TASK_BRIEF_URL_OR_PATH}}
+- local target folder: {{TARGET_PROJECT_DIR}}
+- status target: {{TARGET_PROJECT_DIR}}/opencollab/Task_Status.json
 
-Read the task brief and any existing Task_Status. Create or update a local-first
-task interface map.
+Read the task brief and any existing target Task_Status. Create or update a
+local-first task interface map in the target repo JSON dataset.
 
 Steps:
 1. Identify the final deliverable and audience.
@@ -39,12 +42,18 @@ Steps:
 5. Create dependency, boundary, and sync links with readable `info`.
 6. Initialize four-person or provided-team membership if members are known.
 7. Create initial conflicts only when the current state is already risky.
-8. Write a valid Task_Status JSON and start the visual system.
+8. Write target `opencollab/TTask_Status.json`.
+9. Write target `opencollab/Task_Status.json`.
+10. Write target `opencollab/Task_Status.schema.json` if the target repo does
+    not already have one.
+11. Start the visual system pointed at the target repo.
 
 Return this structured summary:
 {
   "command": "/ocb init",
-  "cloudDocument": "string",
+  "targetRepo": "owner/repo-or-url",
+  "targetProjectDir": "string",
+  "taskBriefSource": "string",
   "project": {
     "name": "string",
     "finalDeliverable": "string",
@@ -80,7 +89,11 @@ Return this structured summary:
       "nextAction": "string"
     }
   ],
-  "filesWritten": ["opencollab/Task_Status.json"],
+  "filesWritten": [
+    "target:opencollab/TTask_Status.json",
+    "target:opencollab/Task_Status.json",
+    "target:opencollab/Task_Status.schema.json"
+  ],
   "visualization": {
     "localUrl": "http://localhost:5173",
     "status": "started | not-started",
@@ -172,10 +185,10 @@ Output:
 ## Prompt D: Conflict Analysis
 
 Use during `/ocb push`, after local changes are mapped into tasks, and after
-pulling the latest shared JSON.
+pulling the latest target repo JSON dataset.
 
 ```text
-Detect conflicts in the current OpenCollab state.
+Detect conflicts in the current target `Task_Status.json`.
 
 Use the conflict framework:
 - boundary-sync
@@ -213,15 +226,15 @@ Output:
 
 ## Prompt E: `/ocb pull`
 
-Use when synchronizing from GitHub.
+Use when synchronizing from the target task repo on GitHub.
 
 ```text
-Pull the latest shared OpenCollab JSON.
+Pull the latest shared OpenCollab JSON dataset from the target repo.
 
 Steps:
-1. Run `git pull --ff-only`.
+1. Run `git pull --ff-only` in the target task repo.
 2. If Git reports conflicts, stop and report the files.
-3. Re-read Task_Status.
+3. Re-read target `opencollab/Task_Status.json`.
 4. Validate that members, tasks, links, progress, meetings, and conflicts render.
 5. Do not rewrite ownership or progress merely because a pull happened.
 
@@ -244,25 +257,30 @@ Output:
 
 ## Prompt F: `/ocb push`
 
-Use after a user has worked locally with an agent or edited project files.
+Use after a user has worked locally with an agent, changed task claims/progress,
+or edited target project files.
 
 ```text
-Push the current user's OpenCollab update.
+Push the current user's OpenCollab JSON dataset update to the target task repo.
 
 Steps:
-1. Pull latest shared state first using `/ocb pull` behavior.
-2. Inspect local Git changes and recently edited files.
+1. Pull latest target state first using `/ocb pull` behavior when safe.
+2. Inspect target repo Git changes, local UI edits, and recently edited files.
 3. Map file changes to task interfaces by `touches[]` and interface outputs.
 4. Update only tasks supported by evidence.
 5. Preserve other users' claims unless a confirmed replacement happened.
 6. Recompute interdependence-derived conflicts.
 7. Append one timeline update describing the local work and remaining risks.
-8. Save Task_Status, commit, and push.
-9. Reload the visual UI from the latest JSON.
+8. Save target `opencollab/Task_Status.json`.
+9. Commit only target `opencollab/*.json`.
+10. Push the target repo.
+11. Reload the visual UI from the latest JSON.
 
 Output:
 {
   "command": "/ocb push",
+  "targetRepo": "owner/repo-or-url",
+  "targetProjectDir": "string",
   "actorId": "member-id",
   "pulledBeforePush": true,
   "localEvidence": [
@@ -297,6 +315,7 @@ Output:
   },
   "git": {
     "commit": "string-or-null",
+    "filesStaged": ["target:opencollab/Task_Status.json"],
     "pushStatus": "pushed | auth-needed | conflict | failed"
   },
   "visualization": {

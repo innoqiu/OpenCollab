@@ -12,6 +12,7 @@ const STATUS_LABELS = {
 
 function App() {
   const [status, setStatus] = useState(null);
+  const [projectMeta, setProjectMeta] = useState(null);
   const [savedHash, setSavedHash] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [hoveredId, setHoveredId] = useState("");
@@ -29,7 +30,7 @@ function App() {
     summary: "",
     grid: null
   });
-  const [toast, setToast] = useState({ tone: "idle", message: "Loading local task status..." });
+  const [toast, setToast] = useState({ tone: "idle", message: "Loading configured task status..." });
 
   useEffect(() => {
     refreshStatus();
@@ -51,44 +52,65 @@ function App() {
   const dirty = status ? stableHash(status) !== savedHash : false;
 
   async function refreshStatus() {
-    setToast({ tone: "idle", message: "Reading opencollab/Task_Status.json..." });
-    const next = normalizeStatus(await api("/api/status"));
-    setStatus(next);
-    setSavedHash(stableHash(next));
-    setSelectedId((current) => current || next.tasks[0]?.id || "");
-    setToast({ tone: "ok", message: "Refresh complete. Local JSON is rendered." });
+    try {
+      setToast({ tone: "idle", message: "Reading configured Task_Status.json..." });
+      const result = await api("/api/status");
+      const next = normalizeStatus(result.status ?? result);
+      setProjectMeta(result.meta ?? null);
+      setStatus(next);
+      setSavedHash(stableHash(next));
+      setSelectedId((current) => current || next.tasks[0]?.id || "");
+      setToast({ tone: "ok", message: "Refresh complete. Project JSON is rendered." });
+    } catch (error) {
+      setToast({ tone: "error", message: error.message });
+    }
   }
 
   async function syncStatus() {
     if (!status) return;
-    const next = { ...status, conflicts };
-    setToast({ tone: "idle", message: "Writing Task_Status.json..." });
-    const result = await api("/api/status", { method: "PUT", body: { status: normalizeStatus(next) } });
-    const saved = normalizeStatus(result.status);
-    setStatus(saved);
-    setSavedHash(stableHash(saved));
-    setToast({ tone: "ok", message: "Sync complete. JSON file updated on disk." });
+    try {
+      const next = { ...status, conflicts };
+      setToast({ tone: "idle", message: "Writing configured Task_Status.json..." });
+      const result = await api("/api/status", { method: "PUT", body: { status: normalizeStatus(next) } });
+      const saved = normalizeStatus(result.status);
+      setProjectMeta(result.meta ?? projectMeta);
+      setStatus(saved);
+      setSavedHash(stableHash(saved));
+      setToast({ tone: "ok", message: "Sync complete. Project JSON updated on disk." });
+    } catch (error) {
+      setToast({ tone: "error", message: error.message });
+    }
   }
 
   async function gitPull() {
-    setToast({ tone: "idle", message: "Running git pull --ff-only..." });
-    const result = await api("/api/git/pull", { method: "POST" });
-    const pulled = normalizeStatus(result.status);
-    setStatus(pulled);
-    setSavedHash(stableHash(pulled));
-    setToast({ tone: "ok", message: "Git pull finished and local JSON was reloaded." });
+    try {
+      setToast({ tone: "idle", message: "Pulling target project repository..." });
+      const result = await api("/api/git/pull", { method: "POST" });
+      const pulled = normalizeStatus(result.status);
+      setProjectMeta(result.meta ?? projectMeta);
+      setStatus(pulled);
+      setSavedHash(stableHash(pulled));
+      setToast({ tone: "ok", message: "Project pull finished and JSON was reloaded." });
+    } catch (error) {
+      setToast({ tone: "error", message: error.message });
+    }
   }
 
   async function agentPush() {
     if (!status) return;
-    const confirmed = window.confirm("/ocb push will review, commit, and push Task_Status.json through Git. Continue?");
+    const confirmed = window.confirm("/ocb push will commit and push only the target project's OpenCollab JSON dataset. Continue?");
     if (!confirmed) return;
-    setToast({ tone: "idle", message: "Running agent push review..." });
-    const result = await api("/api/git/push", { method: "POST", body: { status: normalizeStatus({ ...status, conflicts }) } });
-    const pushed = normalizeStatus(result.status);
-    setStatus(pushed);
-    setSavedHash(stableHash(pushed));
-    setToast({ tone: "ok", message: "Agent push endpoint completed. Check Git output if remote auth failed." });
+    try {
+      setToast({ tone: "idle", message: "Pushing target project JSON dataset..." });
+      const result = await api("/api/git/push", { method: "POST", body: { status: normalizeStatus({ ...status, conflicts }) } });
+      const pushed = normalizeStatus(result.status);
+      setProjectMeta(result.meta ?? projectMeta);
+      setStatus(pushed);
+      setSavedHash(stableHash(pushed));
+      setToast({ tone: "ok", message: "Project JSON push completed." });
+    } catch (error) {
+      setToast({ tone: "error", message: error.message });
+    }
   }
 
   function setCurrentActor(actorId) {
@@ -443,6 +465,7 @@ function App() {
       <Header
         actor={currentActor}
         dirty={dirty}
+        meta={projectMeta}
         status={status}
         toast={toast}
         onAgentPush={agentPush}
@@ -526,7 +549,9 @@ function App() {
   );
 }
 
-function Header({ actor, dirty, status, toast, onAgentPush, onGitPull, onRefresh, onSync }) {
+function Header({ actor, dirty, meta, status, toast, onAgentPush, onGitPull, onRefresh, onSync }) {
+  const projectLine = meta?.repo || status.workspace.repo || "local project";
+  const fileLine = meta?.statusFile || status.workspace.statusFile || "opencollab/Task_Status.json";
   return (
     <header className="oc-header">
       <div className="brand-block">
@@ -534,7 +559,7 @@ function Header({ actor, dirty, status, toast, onAgentPush, onGitPull, onRefresh
         <div>
           <h1>{status.workspace.name}</h1>
           <p>
-            {status.workspace.repo} / {status.workspace.branch}
+            {projectLine} / {status.workspace.branch} / {fileLine}
           </p>
         </div>
       </div>
@@ -550,8 +575,8 @@ function Header({ actor, dirty, status, toast, onAgentPush, onGitPull, onRefresh
         <div className={`save-indicator ${dirty ? "dirty" : "clean"}`}>{dirty ? "Local changes pending sync" : "Synced"}</div>
         <button type="button" onClick={onRefresh}>Refresh</button>
         <button type="button" onClick={onSync}>Sync</button>
-        <button type="button" onClick={onGitPull}>Git Pull</button>
-        <button type="button" onClick={onAgentPush}>Git Push</button>
+        <button type="button" onClick={onGitPull}>Pull JSON</button>
+        <button type="button" onClick={onAgentPush}>Push JSON</button>
         {actor && (
           <span className="actor-chip" style={{ "--chip": actor.color }}>
             {actor.signature}

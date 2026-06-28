@@ -1,31 +1,32 @@
 # OpenCollab Agent Entry
 
-This repository uses OpenCollab. Treat `/ocb` and `/OCB` as protocol commands
-typed by the user inside an agent conversation, not as native shell commands.
+This is the OpenCollab **tool repo**, not the task project's cloud state repo.
+Treat `/ocb` and `/OCB` as protocol commands typed by the user inside an agent
+conversation, not as native shell commands.
 
 Before project work or any `/ocb` command, read these files in order:
 
 1. `opencollab/AGENT.md`
 2. `opencollab/PROTOCOL_COMMANDS.md`
-3. `opencollab/Task_Status.json`
-4. `opencollab/Task_Status.schema.json`
-5. `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`
-6. `opencollab/PROMPTS.md`
-7. `README.md`
+3. `opencollab/Task_Status.schema.json`
+4. `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`
+5. `opencollab/PROMPTS.md`
+6. `README.md`
 
-The shared collaboration state is `opencollab/Task_Status.json`.
+Then identify the configured target task repo. If `.opencollab/current-project.json`
+exists, use it. If not, ask for or infer:
 
-When the user types a protocol command:
+- local target repo folder, for example `../DemoOpenColl2`
+- task brief URL or file, for example `TASK_BRIEF.md`
+- target GitHub repo, for example `innoqiu/DemoOpenColl2`
+- current actor id/signature/color
 
-- `/ocb init`: read the first-read files, initialize or refresh the task map,
-  and start the local visual board.
-- `/ocb pull`: pull the latest GitHub state, re-read `Task_Status.json`, and
-  report any conflicts or changed task interfaces.
-- `/ocb push`: review local work, update `Task_Status.json`, recompute
-  conflicts, append one timeline update, commit, and push.
-- `/ocb mtg`: add a meeting note to `meetings[]` and `timeline[]`.
-- `/ocb def`: set the current workspace and actor identity.
+The shared collaboration state is in the target task repo, normally:
 
-Helper scripts such as `npm run ocb -- pull` may be used to perform mechanical
-steps, but the agent remains responsible for reading the protocol, reviewing
-work, and updating the JSON intentionally.
+```text
+<target-repo>/opencollab/Task_Status.json
+```
+
+Do not push the OpenCollab tool repo during ordinary `/ocb push`. Push only the
+target task repo's OpenCollab JSON dataset unless the user explicitly asks to
+change the OpenCollab software itself.
