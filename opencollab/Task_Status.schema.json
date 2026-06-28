@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opencollab.local/schema/Task_Status.schema.json",
+  "title": "OpenCollab Task Status",
+  "type": "object",
+  "required": ["schemaVersion", "workspace", "view", "members", "categories", "tasks", "links", "timeline", "conflicts"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "view": {
+      "type": "object",
+      "required": ["board", "taskIdPrefix", "progressSteps"],
+      "properties": {
+        "board": {
+          "type": "object",
+          "required": ["cols", "rows"],
+          "properties": {
+            "cols": { "type": "integer", "minimum": 1 },
+            "rows": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "taskIdPrefix": { "type": "string", "minLength": 1 },
+        "progressSteps": { "type": "integer", "minimum": 8, "maximum": 40 }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "required": ["init", "pull", "push", "mtg"],
+      "properties": {
+        "def": { "type": "string" },
+        "init": { "type": "string" },
+        "run": { "type": "string" },
+        "pull": { "type": "string" },
+        "push": { "type": "string" },
+        "mtg": { "type": "string" }
+      }
+    },
+    "taskBrief": {
+      "type": "object",
+      "required": ["path", "firstReadOrder", "lastReviewedAt"],
+      "properties": {
+        "path": { "type": "string" },
+        "firstReadOrder": { "type": "array", "items": { "type": "string" } },
+        "lastReviewedAt": { "type": "string" }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["name", "repo", "branch", "locked", "statusFile", "currentActorId", "updatedAt"],
+      "properties": {
+        "name": { "type": "string" },
+        "repo": { "type": "string" },
+        "branch": { "type": "string" },
+        "locked": { "type": "boolean" },
+        "statusFile": { "type": "string" },
+        "currentActorId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "displayName", "signature", "color", "role", "active"],
+        "properties": {
+          "id": { "type": "string" },
+          "displayName": { "type": "string" },
+          "signature": { "type": "string", "minLength": 1, "maxLength": 4 },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+          "role": { "enum": ["human", "agent"] },
+          "active": { "type": "boolean" }
+        }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "color"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "category", "state", "progress", "grid", "summary", "touches", "interfaces", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "category": { "type": "string" },
+          "state": { "enum": ["undo", "claimed", "active", "done"] },
+          "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "claimantId": { "type": ["string", "null"] },
+          "grid": {
+            "type": "object",
+            "required": ["x", "y", "w", "h"],
+            "properties": {
+              "x": { "type": "integer", "minimum": 1 },
+              "y": { "type": "integer", "minimum": 1 },
+              "w": { "type": "integer", "minimum": 1 },
+              "h": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "summary": { "type": "string" },
+          "touches": { "type": "array", "items": { "type": "string" } },
+          "interfaces": {
+            "type": "object",
+            "required": ["inputs", "outputs", "boundaryNotes"],
+            "properties": {
+              "inputs": { "type": "array", "items": { "type": "string" } },
+              "outputs": { "type": "array", "items": { "type": "string" } },
+              "boundaryNotes": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "updatedAt": { "type": "string" }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target", "kind", "info", "createdBy", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "kind": { "enum": ["dependency", "boundary", "sync"] },
+          "info": { "type": "string" },
+          "createdBy": { "type": "string" },
+          "createdAt": { "type": "string" }
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "actorId", "taskIds", "title", "details", "createdAt", "adds"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "enum": ["update", "meeting", "claim", "status", "sync", "link", "member"] },
+          "actorId": { "type": "string" },
+          "taskIds": { "type": "array", "items": { "type": "string" } },
+          "title": { "type": "string" },
+          "details": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "adds": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "severity", "taskIds", "memberIds", "title", "message", "detectedAt", "resolved"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "enum": ["boundary-sync", "shared-file", "dependency-not-done", "double-claim"] },
+          "severity": { "enum": ["low", "medium", "high"] },
+          "taskIds": { "type": "array", "items": { "type": "string" } },
+          "memberIds": { "type": "array", "items": { "type": "string" } },
+          "title": { "type": "string" },
+          "message": { "type": "string" },
+          "detectedAt": { "type": "string" },
+          "resolved": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
