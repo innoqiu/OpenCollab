@@ -59,7 +59,7 @@ function App() {
       setProjectMeta(result.meta ?? null);
       setStatus(next);
       setSavedHash(stableHash(next));
-      setSelectedId((current) => current || next.tasks[0]?.id || "");
+      setSelectedId((current) => (next.tasks.some((task) => task.id === current) ? current : ""));
       setToast({ tone: "ok", message: "Refresh complete. Project JSON is rendered." });
     } catch (error) {
       setToast({ tone: "error", message: error.message });
