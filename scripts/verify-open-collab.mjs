@@ -75,6 +75,9 @@ assert(viteConfig.includes("resolveProjectConfig"), "local API should resolve th
 assert(viteConfig.includes("/api/projects"), "local API should expose registered task projects");
 assert(viteConfig.includes("/api/project/use"), "local API should support project switching");
 assert(viteConfig.includes("collectJsonDataset"), "push endpoint should stage only JSON dataset files");
+assert(viteConfig.includes("smartPush"), "push endpoint should run Smart Push when GitHub has newer commits");
+assert(viteConfig.includes("mergeStatuses"), "Smart Push should compare base/local/remote task status");
+assert(viteConfig.includes("pushProposalBranch"), "Smart Push should save semantic conflicts to proposal branches");
 assert(viteConfig.includes("BRANCH_DIVERGED"), "local API should explain diverged Git branches");
 assert(viteConfig.includes("REMOTE_AHEAD_BLOCK_PUSH"), "local API should preflight remote-ahead pushes");
 assert(viteConfig.includes("LOCAL_CHANGES_BLOCK_PULL"), "local API should explain local changes before pull");
@@ -83,6 +86,8 @@ assert(projectConfig.includes("opencollab/Task_Status.json"), "project config sh
 assert(app.includes("Project JSON is rendered"), "UI should describe the configured project JSON");
 assert(app.includes("Push JSON"), "UI should expose JSON-only push copy");
 assert(app.includes("Pull JSON"), "UI should expose JSON-only pull copy");
+assert(app.includes("Smart Push is checking remote task updates"), "UI should describe Smart Push progress");
+assert(app.includes("saved proposal branch"), "UI should report proposal branch fallback");
 assert(app.includes("taskAtGrid(status.tasks, nextGrid, task.id)"), "drag collision check is not wired");
 assert(app.includes("onRequestInterdependence(task, hitTask, nextGrid)"), "drag collision does not open interdependence flow");
 assert(app.includes("InterdependenceDialog"), "interdependence dialog component is missing");

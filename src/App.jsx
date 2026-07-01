@@ -98,16 +98,27 @@ function App() {
 
   async function agentPush() {
     if (!status) return;
-    const confirmed = window.confirm("/ocb push will commit and push only the target project's OpenCollab JSON dataset. Continue?");
+    const confirmed = window.confirm(
+      "/ocb push will publish this task JSON, auto-merge safe remote updates, and save a proposal branch if overlapping task changes are found. Continue?"
+    );
     if (!confirmed) return;
     try {
-      setToast({ tone: "idle", message: "Pushing target project JSON dataset..." });
+      setToast({ tone: "idle", message: "Smart Push is checking remote task updates..." });
       const result = await api("/api/git/push", { method: "POST", body: { status: normalizeStatus({ ...status, conflicts }) } });
       const pushed = normalizeStatus(result.status);
       setProjectMeta(result.meta ?? projectMeta);
       setStatus(pushed);
       setSavedHash(stableHash(pushed));
-      setToast({ tone: "ok", message: "Project JSON push completed." });
+      if (result.mode === "smart-merge") {
+        setToast({ tone: "ok", message: "Smart Push merged remote updates and pushed main." });
+      } else if (result.mode === "proposal") {
+        setToast({
+          tone: "ok",
+          message: `Task conflict found. Main was left unchanged; saved proposal branch ${result.proposalBranch}.`
+        });
+      } else {
+        setToast({ tone: "ok", message: "Project JSON push completed." });
+      }
     } catch (error) {
       setToast({ tone: "error", message: error.message });
     }

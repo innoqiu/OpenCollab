@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { defineConfig } from "vite";
@@ -16,6 +17,18 @@ import {
 const execFileAsync = promisify(execFile);
 const defaultBoard = { cols: 14, rows: 12 };
 const defaultCategory = { id: "general", label: "General", color: "#7d838f" };
+const semanticTaskFields = [
+  "title",
+  "category",
+  "state",
+  "claimantId",
+  "ownerId",
+  "progress",
+  "grid",
+  "summary",
+  "touches",
+  "interfaces"
+];
 
 function json(res, statusCode, payload) {
   res.statusCode = statusCode;
@@ -39,6 +52,10 @@ async function readStatus() {
 
 async function writeStatus(status) {
   const config = await resolveProjectConfig();
+  return writeStatusForConfig(config, status);
+}
+
+async function writeStatusForConfig(config, status) {
   if (config.usingFallbackStatus && !config.hasLocalConfig) {
     throw new Error("No target project is configured. Run npm run ocb -- init <github-repo-url> first.");
   }
@@ -328,6 +345,483 @@ async function branchDivergence(config) {
   return { ahead, behind };
 }
 
+async function upstreamInfo(config) {
+  const fallback = { remote: "origin", branch: "main", remoteRef: "origin/main", pushRef: "refs/heads/main" };
+  const result = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], config).catch(() => null);
+  const remoteRef = result?.stdout?.trim() || fallback.remoteRef;
+  const [remote = fallback.remote, ...branchParts] = remoteRef.split("/");
+  const branch = branchParts.join("/") || fallback.branch;
+  return {
+    remote,
+    branch,
+    remoteRef,
+    pushRef: `refs/heads/${branch}`
+  };
+}
+
+async function mergeBaseRef(config) {
+  const result = await runGit(["merge-base", "HEAD", "@{u}"], config).catch(() => null);
+  return result?.stdout?.trim() || "HEAD";
+}
+
+async function readStatusAtRef(config, ref) {
+  const statusFile = projectRelativeFile(config, config.statusPath, config.statusFile);
+  const { stdout } = await runGit(["show", `${ref}:${posixPath(statusFile)}`], config);
+  return normalizeStatus(JSON.parse(stdout));
+}
+
+async function commitStatusDataset(config, status, message) {
+  const current = await writeStatusForConfig(config, status);
+  const files = await collectJsonDataset(config);
+  if (files.length) await runGit(["add", ...files], config);
+  const diff = await runGit(["diff", "--cached", "--quiet"], config).catch((error) => error);
+  const merging = await hasMergeHead(config);
+  let commit = { stdout: "", stderr: "No staged changes to commit." };
+  if (diff?.code === 1 || merging) {
+    commit = await runGit(["commit", "-m", message], config);
+  }
+  return { current, files, commit };
+}
+
+async function hasMergeHead(config) {
+  const result = await runGit(["rev-parse", "-q", "--verify", "MERGE_HEAD"], config).catch(() => null);
+  return Boolean(result?.stdout?.trim());
+}
+
+async function directPush(config, localStatus, upstream) {
+  const prepared = await commitStatusDataset(config, localStatus, "Update OpenCollab task status dataset");
+  const push = await runGit(["push", upstream.remote, `HEAD:${upstream.pushRef}`], config);
+  return {
+    ok: true,
+    mode: "direct",
+    status: prepared.current.status,
+    meta: prepared.current.meta,
+    commit: prepared.commit,
+    push,
+    files: prepared.files,
+    branch: upstream.branch
+  };
+}
+
+async function smartPush(config, localStatus, divergence, upstream) {
+  const baseRef = divergence.ahead > 0 ? await mergeBaseRef(config) : "HEAD";
+  const [baseStatus, remoteStatus] = await Promise.all([
+    readStatusAtRef(config, baseRef),
+    readStatusAtRef(config, upstream.remoteRef)
+  ]);
+  const semanticMerge = mergeStatuses(baseStatus, localStatus, remoteStatus);
+
+  if (semanticMerge.conflicts.length) {
+    const proposal = await pushProposalBranch(config, localStatus, semanticMerge.conflicts, upstream);
+    const current = await writeStatusForConfig(config, localStatus);
+    return {
+      ok: true,
+      mode: "proposal",
+      status: current.status,
+      meta: current.meta,
+      proposalBranch: proposal.branch,
+      proposalPush: proposal.push,
+      semanticConflicts: semanticMerge.conflicts,
+      divergence,
+      details:
+        "Smart Push found overlapping task-interface changes, so main was left unchanged and this version was saved on a proposal branch."
+    };
+  }
+
+  const prepared = await commitStatusDataset(config, localStatus, "Update OpenCollab task status dataset");
+  const localHead = (await runGit(["rev-parse", "HEAD"], config)).stdout.trim();
+  const mergeResult = await pushMergedStatusFromWorktree(
+    config,
+    localHead,
+    semanticMerge.status,
+    upstream,
+    "Smart merge OpenCollab task status"
+  );
+  await runGit(["fetch", upstream.remote], config);
+  await runGit(["merge", "--ff-only", upstream.remoteRef], config);
+  const { status, meta } = await readStatus();
+  return {
+    ok: true,
+    mode: "smart-merge",
+    status,
+    meta,
+    localCommit: prepared.commit,
+    mergeCommit: mergeResult.commit,
+    push: mergeResult.push,
+    files: prepared.files,
+    branch: upstream.branch,
+    divergence,
+    mergeSummary: semanticMerge.summary
+  };
+}
+
+async function pushMergedStatusFromWorktree(config, localHead, mergedStatus, upstream, message) {
+  return withDetachedWorktree(config, localHead, async (worktreeConfig) => {
+    await runGit(["merge", "--no-ff", "--no-commit", "-X", "ours", upstream.remoteRef], worktreeConfig);
+    const prepared = await commitStatusDataset(worktreeConfig, mergedStatus, message);
+    const push = await runGit(["push", upstream.remote, `HEAD:${upstream.pushRef}`], worktreeConfig);
+    return { commit: prepared.commit, push };
+  });
+}
+
+async function pushProposalBranch(config, localStatus, semanticConflicts, upstream) {
+  const actor = branchSafe(localStatus.workspace?.currentActorId || "agent");
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const suffix = Math.random().toString(16).slice(2, 6);
+  const branch = `ocb/proposal/${actor}/${stamp}-${suffix}`;
+  return withDetachedWorktree(config, upstream.remoteRef, async (worktreeConfig) => {
+    const prepared = await commitStatusDataset(
+      worktreeConfig,
+      {
+        ...localStatus,
+        conflicts: [...(localStatus.conflicts ?? []), ...semanticConflicts]
+      },
+      "Propose OpenCollab task status update"
+    );
+    const push = await runGit(["push", upstream.remote, `HEAD:refs/heads/${branch}`], worktreeConfig);
+    return { branch, commit: prepared.commit, push };
+  });
+}
+
+async function withDetachedWorktree(config, ref, callback) {
+  const tempParent = await fs.mkdtemp(path.join(os.tmpdir(), "opencollab-smartpush-"));
+  const tempRoot = path.join(tempParent, "worktree");
+  await runGit(["worktree", "add", "--detach", tempRoot, ref], config);
+  const worktreeConfig = configForProjectRoot(config, tempRoot);
+  try {
+    return await callback(worktreeConfig, tempRoot);
+  } finally {
+    await runGit(["worktree", "remove", "--force", tempRoot], config).catch(() => null);
+    await fs.rm(tempParent, { recursive: true, force: true }).catch(() => null);
+  }
+}
+
+function configForProjectRoot(config, projectRoot) {
+  const statusFile = projectRelativeFile(config, config.statusPath, config.statusFile);
+  const tinyStatusFile = projectRelativeFile(config, config.tinyStatusPath, config.tinyStatusFile);
+  const schemaFile = projectRelativeFile(config, config.schemaPath, config.schemaFile);
+  const briefFile = projectRelativeFile(config, config.briefPath, config.briefFile);
+  return {
+    ...config,
+    projectRoot,
+    projectDir: projectRoot,
+    statusFile,
+    statusPath: path.join(projectRoot, statusFile),
+    tinyStatusFile,
+    tinyStatusPath: path.join(projectRoot, tinyStatusFile),
+    schemaFile,
+    schemaPath: path.join(projectRoot, schemaFile),
+    briefFile,
+    briefPath: path.join(projectRoot, briefFile)
+  };
+}
+
+function projectRelativeFile(config, absolutePath, configuredPath) {
+  if (!path.isAbsolute(configuredPath)) return posixPath(configuredPath);
+  const relative = path.relative(config.projectRoot, absolutePath);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) return posixPath(relative);
+  return posixPath(configuredPath);
+}
+
+function mergeStatuses(baseStatus, localStatus, remoteStatus) {
+  const semanticConflicts = [];
+  const taskMerge = mergeTasks(baseStatus.tasks ?? [], localStatus.tasks ?? [], remoteStatus.tasks ?? [], semanticConflicts);
+  const linkMerge = mergeEntityList("link", baseStatus.links ?? [], localStatus.links ?? [], remoteStatus.links ?? [], semanticConflicts);
+  const memberMerge = mergeEntityList(
+    "member",
+    baseStatus.members ?? [],
+    localStatus.members ?? [],
+    remoteStatus.members ?? [],
+    semanticConflicts
+  );
+  const categoryMerge = mergeEntityList(
+    "category",
+    baseStatus.categories ?? [],
+    localStatus.categories ?? [],
+    remoteStatus.categories ?? [],
+    semanticConflicts
+  );
+  const meetingMerge = mergeAppendOnlyList(
+    "meeting",
+    baseStatus.meetings ?? [],
+    localStatus.meetings ?? [],
+    remoteStatus.meetings ?? [],
+    semanticConflicts
+  );
+  const timelineMerge = mergeAppendOnlyList(
+    "timeline",
+    baseStatus.timeline ?? [],
+    localStatus.timeline ?? [],
+    remoteStatus.timeline ?? [],
+    semanticConflicts
+  );
+
+  const mergedBase = {
+    ...remoteStatus,
+    workspace: mergePlainObjectField("workspace", baseStatus.workspace, localStatus.workspace, remoteStatus.workspace, semanticConflicts),
+    commands: mergePlainObjectField("commands", baseStatus.commands, localStatus.commands, remoteStatus.commands, semanticConflicts),
+    protocol: mergePlainObjectField("protocol", baseStatus.protocol, localStatus.protocol, remoteStatus.protocol, semanticConflicts),
+    taskBrief: mergePlainObjectField("taskBrief", baseStatus.taskBrief, localStatus.taskBrief, remoteStatus.taskBrief, semanticConflicts),
+    view: mergePlainObjectField("view", baseStatus.view, localStatus.view, remoteStatus.view, semanticConflicts),
+    categories: categoryMerge.items,
+    members: memberMerge.items,
+    tasks: taskMerge.items,
+    links: linkMerge.items,
+    meetings: meetingMerge.items,
+    timeline: timelineMerge.items
+  };
+  const normalized = normalizeStatus({
+    ...mergedBase,
+    workspace: {
+      ...(mergedBase.workspace ?? {}),
+      currentActorId: localStatus.workspace?.currentActorId ?? mergedBase.workspace?.currentActorId,
+      updatedAt: new Date().toISOString()
+    }
+  });
+  normalized.conflicts = analyzeConflicts(normalized);
+  return {
+    status: normalized,
+    conflicts: semanticConflicts,
+    summary: {
+      localTaskChanges: taskMerge.localChanges,
+      remoteTaskChanges: taskMerge.remoteChanges,
+      mergedTasks: taskMerge.items.length,
+      mergedLinks: linkMerge.items.length,
+      mergedMeetings: meetingMerge.items.length
+    }
+  };
+}
+
+function mergeTasks(baseList, localList, remoteList, semanticConflicts) {
+  const base = entityMap(baseList);
+  const local = entityMap(localList);
+  const remote = entityMap(remoteList);
+  const ids = orderedIds(remoteList, localList, baseList);
+  const items = [];
+  let localChanges = 0;
+  let remoteChanges = 0;
+
+  for (const id of ids) {
+    const baseTask = base.get(id);
+    const localTask = local.get(id);
+    const remoteTask = remote.get(id);
+
+    if (!baseTask) {
+      if (localTask && remoteTask && !semanticEqual(localTask, remoteTask, ["updatedAt"])) {
+        semanticConflicts.push(makeSemanticConflict("task", id, ["created"], localTask, remoteTask));
+        items.push(remoteTask);
+      } else if (localTask || remoteTask) {
+        items.push(localTask ?? remoteTask);
+        if (localTask) localChanges += 1;
+        if (remoteTask) remoteChanges += 1;
+      }
+      continue;
+    }
+
+    if (!localTask && !remoteTask) continue;
+    if (!localTask) {
+      if (entityChanged(baseTask, remoteTask, semanticTaskFields)) {
+        semanticConflicts.push(makeSemanticConflict("task", id, ["deleted locally", "changed remotely"], baseTask, remoteTask));
+        items.push(remoteTask);
+        remoteChanges += 1;
+      }
+      continue;
+    }
+    if (!remoteTask) {
+      if (entityChanged(baseTask, localTask, semanticTaskFields)) {
+        semanticConflicts.push(makeSemanticConflict("task", id, ["changed locally", "deleted remotely"], localTask, baseTask));
+        items.push(localTask);
+        localChanges += 1;
+      }
+      continue;
+    }
+
+    const localFields = changedFields(baseTask, localTask, semanticTaskFields);
+    const remoteFields = changedFields(baseTask, remoteTask, semanticTaskFields);
+    if (localFields.length) localChanges += 1;
+    if (remoteFields.length) remoteChanges += 1;
+    const overlapping = localFields.filter(
+      (field) => remoteFields.includes(field) && !semanticEqual(localTask[field], remoteTask[field])
+    );
+    if (overlapping.length) {
+      semanticConflicts.push(makeSemanticConflict("task", id, overlapping, localTask, remoteTask));
+      items.push(remoteTask);
+      continue;
+    }
+
+    const merged = { ...remoteTask };
+    for (const field of localFields) merged[field] = localTask[field];
+    merged.updatedAt = latestIso(localTask.updatedAt, remoteTask.updatedAt, baseTask.updatedAt);
+    items.push(merged);
+  }
+
+  return { items, localChanges, remoteChanges };
+}
+
+function mergeEntityList(type, baseList, localList, remoteList, semanticConflicts) {
+  const base = entityMap(baseList);
+  const local = entityMap(localList);
+  const remote = entityMap(remoteList);
+  const ids = orderedIds(remoteList, localList, baseList);
+  const items = [];
+
+  for (const id of ids) {
+    const baseItem = base.get(id);
+    const localItem = local.get(id);
+    const remoteItem = remote.get(id);
+
+    if (!baseItem) {
+      if (localItem && remoteItem && !semanticEqual(localItem, remoteItem, ["updatedAt"])) {
+        semanticConflicts.push(makeSemanticConflict(type, id, ["created"], localItem, remoteItem));
+        items.push(remoteItem);
+      } else if (localItem || remoteItem) {
+        items.push(localItem ?? remoteItem);
+      }
+      continue;
+    }
+
+    const localChanged = localItem ? !semanticEqual(baseItem, localItem, ["updatedAt"]) : !semanticEqual(baseItem, null);
+    const remoteChanged = remoteItem ? !semanticEqual(baseItem, remoteItem, ["updatedAt"]) : !semanticEqual(baseItem, null);
+    if (!localItem && !remoteItem) continue;
+    if (localChanged && remoteChanged && !semanticEqual(localItem, remoteItem, ["updatedAt"])) {
+      semanticConflicts.push(makeSemanticConflict(type, id, ["updated"], localItem, remoteItem));
+      if (remoteItem) items.push(remoteItem);
+      continue;
+    }
+    if (localChanged) {
+      if (localItem) items.push(localItem);
+      continue;
+    }
+    if (remoteItem) items.push(remoteItem);
+  }
+
+  return { items };
+}
+
+function mergeAppendOnlyList(type, baseList, localList, remoteList, semanticConflicts) {
+  const base = entityMap(baseList);
+  const remote = entityMap(remoteList);
+  const local = entityMap(localList);
+  const merged = new Map();
+
+  for (const item of remoteList) if (item?.id) merged.set(item.id, item);
+  for (const item of localList) {
+    if (!item?.id) continue;
+    const remoteItem = remote.get(item.id);
+    const baseItem = base.get(item.id);
+    if (
+      remoteItem &&
+      baseItem &&
+      !semanticEqual(baseItem, item, ["updatedAt"]) &&
+      !semanticEqual(baseItem, remoteItem, ["updatedAt"]) &&
+      !semanticEqual(item, remoteItem, ["updatedAt"])
+    ) {
+      semanticConflicts.push(makeSemanticConflict(type, item.id, ["updated"], item, remoteItem));
+      continue;
+    }
+    if (!remoteItem || !semanticEqual(item, remoteItem, ["updatedAt"])) merged.set(item.id, item);
+  }
+
+  const items = [...merged.values()].sort((a, b) => {
+    const left = Date.parse(a.createdAt ?? a.updatedAt ?? "");
+    const right = Date.parse(b.createdAt ?? b.updatedAt ?? "");
+    if (Number.isFinite(left) && Number.isFinite(right)) return right - left;
+    return 0;
+  });
+  return { items };
+}
+
+function mergePlainObjectField(type, baseValue, localValue, remoteValue, semanticConflicts) {
+  const localChanged = !semanticEqual(baseValue ?? null, localValue ?? null, ["updatedAt"]);
+  const remoteChanged = !semanticEqual(baseValue ?? null, remoteValue ?? null, ["updatedAt"]);
+  if (localChanged && remoteChanged && !semanticEqual(localValue ?? null, remoteValue ?? null, ["updatedAt"])) {
+    semanticConflicts.push(makeSemanticConflict(type, type, ["updated"], localValue, remoteValue));
+    return remoteValue ?? localValue ?? baseValue;
+  }
+  if (localChanged) return localValue ?? remoteValue ?? baseValue;
+  return remoteValue ?? localValue ?? baseValue;
+}
+
+function changedFields(baseItem, nextItem, fields) {
+  return fields.filter((field) => !semanticEqual(baseItem?.[field], nextItem?.[field]));
+}
+
+function entityChanged(baseItem, nextItem, fields) {
+  return changedFields(baseItem, nextItem, fields).length > 0;
+}
+
+function entityMap(items) {
+  const map = new Map();
+  for (const item of items ?? []) {
+    if (item?.id) map.set(item.id, item);
+  }
+  return map;
+}
+
+function orderedIds(...lists) {
+  const ids = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const item of list ?? []) {
+      if (!item?.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      ids.push(item.id);
+    }
+  }
+  return ids;
+}
+
+function makeSemanticConflict(type, id, fields, localValue, remoteValue) {
+  const taskIds = type === "task" ? [id] : [...new Set([...(localValue?.taskIds ?? []), ...(remoteValue?.taskIds ?? [])])];
+  return {
+    id: `smart-${type}-${branchSafe(id)}-${fields.map(branchSafe).join("-")}`,
+    type: "smart-push-conflict",
+    severity: "high",
+    taskIds,
+    title: "Smart Push conflict",
+    message: `${type} ${id} has overlapping ${fields.join(", ")} change(s). Main was not changed; review the proposal branch.`,
+    detectedAt: new Date().toISOString(),
+    resolved: false
+  };
+}
+
+function semanticEqual(left, right, ignoreKeys = []) {
+  return JSON.stringify(canonicalValue(left, new Set(ignoreKeys))) === JSON.stringify(canonicalValue(right, new Set(ignoreKeys)));
+}
+
+function canonicalValue(value, ignoreKeys) {
+  if (Array.isArray(value)) return value.map((item) => canonicalValue(item, ignoreKeys));
+  if (!value || typeof value !== "object") return value === undefined ? null : value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .filter((key) => !ignoreKeys.has(key))
+      .sort()
+      .map((key) => [key, canonicalValue(value[key], ignoreKeys)])
+  );
+}
+
+function latestIso(...values) {
+  const parsed = values
+    .map((value) => Date.parse(value ?? ""))
+    .filter((value) => Number.isFinite(value));
+  if (!parsed.length) return new Date().toISOString();
+  return new Date(Math.max(...parsed)).toISOString();
+}
+
+function branchSafe(value) {
+  return String(value ?? "item")
+    .trim()
+    .replace(/[^a-z0-9._/-]+/gi, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/^\/+|\/+$/g, "")
+    .slice(0, 80) || "item";
+}
+
+function posixPath(value) {
+  return String(value ?? "").replace(/\\/g, "/");
+}
+
 function localChangesPullPayload(config, changes, divergence = {}) {
   const files = changes.map((change) => change.file);
   return {
@@ -378,9 +872,14 @@ function remoteAheadPushPayload(config, divergence) {
   };
 }
 
+function isNonFastForwardError(error) {
+  const text = [error.message, error.stderr, error.stdout].filter(Boolean).join("\n");
+  return /non-fast-forward|failed to push some refs|tip of your current branch is behind/i.test(text);
+}
+
 function gitFailurePayload(error) {
   const text = [error.message, error.stderr, error.stdout].filter(Boolean).join("\n");
-  if (/non-fast-forward|failed to push some refs|tip of your current branch is behind/i.test(text)) {
+  if (isNonFastForwardError(error)) {
     return {
       ok: false,
       code: "PUSH_REJECTED_NON_FAST_FORWARD",
@@ -516,28 +1015,25 @@ function localApiPlugin() {
 
           if (req.method === "POST" && url.pathname === "/api/git/push") {
             const config = await resolveProjectConfig();
-            const divergence = await branchDivergence(config);
-            if (divergence.ahead > 0 && divergence.behind > 0) {
-              json(res, 409, divergedBranchPayload(config, divergence, "Push"));
-              return;
-            }
-            if (divergence.behind > 0) {
-              json(res, 409, remoteAheadPushPayload(config, divergence));
-              return;
-            }
             const body = await readBody(req);
             const currentRead = await readStatus();
             const draft = body.status ?? currentRead.status;
-            const current = await writeStatus(appendPushUpdate(draft));
-            const jsonDataset = await collectJsonDataset(config);
-            if (jsonDataset.length) await runGit(["add", ...jsonDataset], config);
-            const diff = await runGit(["diff", "--cached", "--quiet"], config).catch((error) => error);
-            let commit = { stdout: "", stderr: "No staged changes to commit." };
-            if (diff?.code === 1) {
-              commit = await runGit(["commit", "-m", "Update OpenCollab task status dataset"], config);
+            const localStatus = normalizeStatus(appendPushUpdate(draft));
+            const divergence = await branchDivergence(config);
+            const upstream = await upstreamInfo(config);
+            let result;
+            if (divergence.behind > 0) {
+              result = await smartPush(config, localStatus, divergence, upstream);
+            } else {
+              try {
+                result = await directPush(config, localStatus, upstream);
+              } catch (error) {
+                if (!isNonFastForwardError(error)) throw error;
+                const latestDivergence = await branchDivergence(config);
+                result = await smartPush(config, localStatus, latestDivergence, upstream);
+              }
             }
-            const push = await runGit(["push"], config);
-            json(res, 200, { ok: true, status: current.status, meta: current.meta, commit, push, files: jsonDataset });
+            json(res, 200, result);
             return;
           }
 
