@@ -709,8 +709,10 @@ function toCamel(key) {
 
 function run(cmd, cmdArgs, options = {}) {
   return new Promise((resolve, reject) => {
-    const executable = process.platform === "win32" && cmd === "npm" ? "npm.cmd" : cmd;
-    const child = spawn(executable, cmdArgs, {
+    const useWindowsNpmShim = process.platform === "win32" && cmd === "npm";
+    const executable = useWindowsNpmShim ? "cmd.exe" : cmd;
+    const args = useWindowsNpmShim ? ["/d", "/s", "/c", "npm", ...cmdArgs] : cmdArgs;
+    const child = spawn(executable, args, {
       cwd: options.cwd ?? process.cwd(),
       shell: false,
       stdio: options.inherit ? "inherit" : "pipe"
