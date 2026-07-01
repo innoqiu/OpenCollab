@@ -36,6 +36,7 @@ for (const task of status.tasks ?? []) {
   assert(allowedStates.has(task.state), `${task.id} has unsupported state ${task.state}`);
   assert(Number.isInteger(task.progress) && task.progress >= 0 && task.progress <= 100, `${task.id} has invalid progress`);
   assert(!("dependsOn" in task), `${task.id} still has redundant dependsOn; dependency links should be in links[]`);
+  assert(task.grid.w === 1 && task.grid.h === 1, `${task.id} should render as a single matrix cell`);
   assert(task.grid.x >= 1 && task.grid.y >= 1, `${task.id} grid starts outside board`);
   assert(task.grid.x + task.grid.w - 1 <= board.cols, `${task.id} grid exceeds board columns`);
   assert(task.grid.y + task.grid.h - 1 <= board.rows, `${task.id} grid exceeds board rows`);
@@ -59,6 +60,8 @@ assert(!schema.properties.tasks.items.properties.state.enum.includes("working"),
 assert(Boolean(schema.properties.tasks.items.properties.progress), "schema does not document task progress");
 assert(!schema.properties.tasks.items.properties.dependsOn, "schema still documents redundant task dependsOn");
 assert(Boolean(schema.properties.links.items.properties.info), "schema does not document links[].info");
+assert(schema.properties.tasks.items.properties.grid.properties.w.maximum === 1, "schema should keep task grid width to one cell");
+assert(schema.properties.tasks.items.properties.grid.properties.h.maximum === 1, "schema should keep task grid height to one cell");
 
 assert(projectConfig.includes("current-project.json"), "project config should persist the local target pointer");
 assert(projectConfig.includes("OCB_PROJECT_DIR"), "project config should support external target project dirs");
@@ -91,6 +94,7 @@ assert(app.includes("task.claimantId && task.claimantId !== currentActor?.id"), 
 assert(app.includes("getBoard(status)") && app.includes("status.view?.taskIdPrefix"), "board and id prefix are not driven by Task_Status view data");
 assert(app.includes("ProgressControl") && app.includes("onProgressChange"), "progress slider is not wired");
 assert(app.includes("\"--tile-opacity\": tileOpacity(progress)"), "task tile opacity is not driven by progress");
+assert(app.includes("const width = 1;") && app.includes("gridIsOpen(candidate, occupied)"), "UI should normalize imported tasks to one grid cell");
 assert(app.includes("Local changes pending sync"), "unsynced indicator should use professional English copy");
 assert(app.includes("/ocb init"), "UI command strip should use /ocb init");
 assert(!app.includes("Create link") && !app.includes("connectSource"), "old create-link flow should be removed");

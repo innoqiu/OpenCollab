@@ -103,8 +103,8 @@
             "properties": {
               "x": { "type": "integer", "minimum": 1 },
               "y": { "type": "integer", "minimum": 1 },
-              "w": { "type": "integer", "minimum": 1 },
-              "h": { "type": "integer", "minimum": 1 }
+              "w": { "type": "integer", "minimum": 1, "maximum": 1 },
+              "h": { "type": "integer", "minimum": 1, "maximum": 1 }
             }
           },
           "summary": { "type": "string" },

@@ -1638,11 +1638,13 @@ function normalizeGrid(grid, index, board, occupied) {
     w: 1,
     h: 1
   };
-  const width = Math.max(1, Math.round(Number(grid?.w) || fallback.w));
-  const height = Math.max(1, Math.round(Number(grid?.h) || fallback.h));
-  const x = clamp(Math.round(Number(grid?.x) || fallback.x), 1, Math.max(1, board.cols - width + 1));
+  const width = 1;
+  const height = 1;
+  const x = clamp(Math.round(Number(grid?.x) || fallback.x), 1, board.cols);
   const y = Math.max(1, Math.round(Number(grid?.y) || fallback.y));
-  return { x, y, w: width, h: height };
+  const candidate = { x, y, w: width, h: height };
+  if (!occupied || gridIsOpen(candidate, occupied)) return candidate;
+  return firstOpenGrid(occupied, board) ?? candidate;
 }
 
 function normalizeInterfaces(interfaces) {
@@ -1663,6 +1665,15 @@ function occupiedGridCells(tasks) {
     }
   }
   return cells;
+}
+
+function gridIsOpen(grid, occupied) {
+  for (let y = grid.y; y < grid.y + grid.h; y += 1) {
+    for (let x = grid.x; x < grid.x + grid.w; x += 1) {
+      if (occupied.has(`${x}:${y}`)) return false;
+    }
+  }
+  return true;
 }
 
 function taskAtGrid(tasks, grid, excludeId = "") {

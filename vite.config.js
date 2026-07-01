@@ -117,12 +117,12 @@ function progressFromState(state) {
 }
 
 function normalizeGrid(grid, index, board) {
-  const width = Math.max(1, Math.round(Number(grid?.w) || 1));
-  const height = Math.max(1, Math.round(Number(grid?.h) || 1));
+  const width = 1;
+  const height = 1;
   const fallbackX = (index % board.cols) + 1;
   const fallbackY = Math.floor(index / board.cols) + 1;
   return {
-    x: Math.min(Math.max(1, Math.round(Number(grid?.x) || fallbackX)), Math.max(1, board.cols - width + 1)),
+    x: Math.min(Math.max(1, Math.round(Number(grid?.x) || fallbackX)), board.cols),
     y: Math.max(1, Math.round(Number(grid?.y) || fallbackY)),
     w: width,
     h: height
