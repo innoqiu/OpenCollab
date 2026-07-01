@@ -29,6 +29,8 @@
         "def": { "type": "string" },
         "init": { "type": "string" },
         "run": { "type": "string" },
+        "list": { "type": "string" },
+        "use": { "type": "string" },
         "pull": { "type": "string" },
         "push": { "type": "string" },
         "mtg": { "type": "string" }

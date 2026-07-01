@@ -8,7 +8,7 @@
     "cloudDocument": "",
     "output": "Replace this template with the task brief from the target project repository.",
     "audience": "A team using OpenCollab as a local visualizer",
-    "collaborationMode": "OpenCollab framework repo stays local; target repo stores task brief and JSON dataset."
+    "collaborationMode": "OpenCollab parent repo stays local; the task folder stores the task brief and JSON dataset."
   },
   "brief": {
     "assignment": "Paste or summarize the target project task brief here during /ocb init.",

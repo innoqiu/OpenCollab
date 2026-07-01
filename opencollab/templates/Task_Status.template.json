@@ -10,40 +10,42 @@
     "updatedAt": "2026-06-29T00:00:00.000Z"
   },
   "commands": {
-    "def": "/ocb def --project-dir <local-target-repo> --repo <owner/repo> --actor <id>",
-    "init": "/ocb init --project-dir <local-target-repo> --source <task-brief-github-url>",
-    "run": "/ocb run  # compatibility alias for /ocb init during the demo period",
+    "def": "/ocb def --actor <id> --signature <text> --color <hex>",
+    "init": "/ocb init <github-task-repo-url>",
+    "run": "/ocb run",
+    "list": "/ocb list",
+    "use": "/ocb use <project-id>",
     "pull": "/ocb pull",
     "push": "/ocb push",
     "mtg": "/ocb mtg --title <meeting> --task <taskId> --notes <text>"
   },
   "protocol": {
     "cloudDocument": "",
-    "commandProtocol": "opencollab/PROTOCOL_COMMANDS.md",
-    "interdependenceFramework": "opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
-    "promptLibrary": "opencollab/PROMPTS.md",
+    "commandProtocol": "parent:opencollab/PROTOCOL_COMMANDS.md",
+    "interdependenceFramework": "parent:opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
+    "promptLibrary": "parent:opencollab/PROMPTS.md",
     "agentEntryFiles": [
       "AGENTS.md",
       "CLAUDE.md",
       ".claude/commands/ocb.md"
     ],
-    "initSummary": "Configure OpenCollab to a target project repository, then create task interfaces from that repository's task brief."
+    "initSummary": "Create or clone a task folder under the parent OpenCollab repo, then create task interfaces from that folder's task brief."
   },
   "taskBrief": {
     "path": "TASK_BRIEF.md",
     "cloudDocument": "",
     "firstReadOrder": [
-      "AGENTS.md",
-      "CLAUDE.md",
-      "opencollab/PROTOCOL_COMMANDS.md",
-      "target:TASK_BRIEF.md",
-      "target:opencollab/TTask_Status.json",
-      "target:opencollab/Task_Status.json",
+      "parent:AGENTS.md",
+      "parent:CLAUDE.md",
+      "parent:opencollab/PROTOCOL_COMMANDS.md",
+      "TASK_BRIEF.md",
+      "opencollab/TTask_Status.json",
+      "opencollab/Task_Status.json",
       "opencollab/Task_Status.schema.json",
-      "opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
-      "opencollab/PROMPTS.md",
-      "opencollab/AGENT.md",
-      "README.md"
+      "parent:opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md",
+      "parent:opencollab/PROMPTS.md",
+      "parent:opencollab/AGENT.md",
+      "parent:README.md"
     ],
     "lastReviewedAt": "2026-06-29T00:00:00.000Z"
   },

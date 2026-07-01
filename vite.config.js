@@ -4,7 +4,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { defineConfig } from "vite";
-import { ensureProjectDirs, resolveProjectConfig } from "./scripts/project-config.mjs";
+import {
+  TASKS_DIR,
+  ensureProjectDirs,
+  findRegisteredProject,
+  listRegisteredProjects,
+  resolveProjectConfig,
+  saveProjectConfig
+} from "./scripts/project-config.mjs";
 
 const execFileAsync = promisify(execFile);
 const defaultBoard = { cols: 14, rows: 12 };
@@ -33,7 +40,7 @@ async function readStatus() {
 async function writeStatus(status) {
   const config = await resolveProjectConfig();
   if (config.usingFallbackStatus && !config.hasLocalConfig) {
-    throw new Error("No target project is configured. Run npm run ocb -- def --project-dir=<target-repo> first.");
+    throw new Error("No target project is configured. Run npm run ocb -- init <github-repo-url> first.");
   }
   await ensureProjectDirs(config);
   const normalized = normalizeStatus(status);
@@ -258,9 +265,16 @@ async function runGit(args, config) {
 
 function projectMeta(config) {
   return {
+    projectId: config.projectId,
+    projectName: config.projectName,
     projectRoot: config.projectRoot,
+    tasksDir: path.join(config.frameworkRoot, TASKS_DIR),
     repo: config.repo,
     source: config.source,
+    tinyStatusFile: config.tinyStatusFile,
+    tinyStatusPath: config.tinyStatusPath,
+    schemaFile: config.schemaFile,
+    schemaPath: config.schemaPath,
     statusFile: config.statusFile,
     statusPath: config.statusPath,
     briefFile: config.briefFile,
@@ -308,6 +322,41 @@ function localApiPlugin() {
           if (req.method === "GET" && url.pathname === "/api/project") {
             const config = await resolveProjectConfig();
             json(res, 200, { ok: true, meta: projectMeta(config) });
+            return;
+          }
+
+          if (req.method === "GET" && url.pathname === "/api/projects") {
+            const config = await resolveProjectConfig();
+            const projects = await listRegisteredProjects(config.frameworkRoot);
+            json(res, 200, { ok: true, current: config.projectId, projects });
+            return;
+          }
+
+          if (req.method === "POST" && url.pathname === "/api/project/use") {
+            const body = await readBody(req);
+            const config = await resolveProjectConfig();
+            const project = await findRegisteredProject(body.projectId ?? body.id ?? body.project, config.frameworkRoot);
+            if (!project) {
+              json(res, 404, { ok: false, error: "OpenCollab project not found" });
+              return;
+            }
+            const nextConfig = await resolveProjectConfig(
+              {
+                id: project.id,
+                name: project.name,
+                projectDir: project.projectDir,
+                repo: project.repo,
+                source: project.source,
+                statusFile: project.statusFile,
+                tinyStatusFile: project.tinyStatusFile,
+                schemaFile: project.schemaFile,
+                brief: project.briefFile
+              },
+              { frameworkRoot: config.frameworkRoot }
+            );
+            await saveProjectConfig(nextConfig);
+            const { status, meta } = await readStatus();
+            json(res, 200, { ok: true, status, meta });
             return;
           }
 

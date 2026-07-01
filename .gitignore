@@ -34,3 +34,7 @@ pnpm-debug.log*
 
 ### OpenCollab local target project pointer ###
 .opencollab/
+
+### OpenCollab local task project workspaces ###
+tasks/*
+!tasks/.gitkeep

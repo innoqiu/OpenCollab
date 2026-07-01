@@ -2,28 +2,31 @@
 
 `/ocb` is a protocol command for local agents. Users type it in Codex, Claude
 Code, or another repo-aware agent. The agent reads this OpenCollab tool repo,
-then operates on a separate target task repo.
+then operates on one task project folder at a time.
 
 `/ocb` is case-insensitive. Treat `/OCB push` and `/ocb push` the same way.
 
-## Separation Of Repos
+## Repo Model
 
-OpenCollab has two repositories:
+OpenCollab has one parent tool repo and many local task project folders:
 
 ```text
 OpenCollab tool repo
   visualizer, prompts, schema, protocol
-
-target task repo
-  TASK_BRIEF.md or another task brief
-  opencollab/TTask_Status.json
-  opencollab/Task_Status.json
-  opencollab/Task_Status.schema.json
+  tasks/
+    owner__ProjectA/
+      TASK_BRIEF.md
+      AGENTS.md
+      CLAUDE.md
+      opencollab/*.json
+    owner__ProjectB/
+      ...
 ```
 
-The target task repo is the lightweight cloud state. Ordinary collaboration
-pushes must not upload the OpenCollab app, `src/`, `vite.config.js`, prompts, or
-agent entry files. Push only the target repo's JSON dataset unless the user
+The `tasks/` folder is ignored by the parent tool repo. Each task folder can be
+a Git clone of a lightweight task repo. Ordinary collaboration pushes must not
+upload the OpenCollab app, `src/`, `vite.config.js`, prompts, or protocol files.
+Push only the current task folder's `opencollab/*.json` dataset unless the user
 explicitly asks to modify the OpenCollab tool itself.
 
 ## First-Run Contract
@@ -36,10 +39,16 @@ When an agent sees `/ocb` in the OpenCollab tool repo:
 4. Read `opencollab/Task_Status.schema.json`.
 5. Read `opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK.md`.
 6. Read `opencollab/PROMPTS.md`.
-7. Resolve the target task repo from `.opencollab/current-project.json` or from
-   the user's command.
-8. Read the target repo's task brief.
-9. Read target `opencollab/Task_Status.json` if it already exists.
+7. Resolve the current task project from `.opencollab/current-project.json` or
+   `.opencollab/projects.json`.
+8. If no project is configured, ask for a GitHub task repo URL and run
+   `npm run ocb -- init <repo-url>`.
+9. Read the current task folder's `TASK_BRIEF.md`,
+   `opencollab/TTask_Status.json`, and `opencollab/Task_Status.json`.
+
+When an agent starts inside `tasks/<project-id>/`, first read that folder's
+generated `AGENTS.md` or `CLAUDE.md`. It points back to the parent OpenCollab
+repo and names the current project id.
 
 Do not invent a new project protocol if these files exist.
 
@@ -51,75 +60,120 @@ Do not invent a new project protocol if these files exist.
 
 Supported actions:
 
-- `def`: define the target task repo folder, task brief, repo URL, and actor.
-- `init`: create or refresh the target repo JSON dataset and open the board.
-- `run`: compatibility alias for `init`.
-- `pull`: pull the target task repo and re-read its JSON dataset.
-- `push`: update, commit, and push the target repo JSON dataset.
-- `mtg`: add a meeting note to the target repo JSON dataset.
+- `init`: create or clone a task project folder, initialize missing JSON files,
+  write thin local agent entry files, select the project, and open the board.
+- `run`: open the board for the current project.
+- `list`: show locally registered task projects.
+- `use`: switch the current task project.
+- `pull`: pull the current task project and re-read its JSON dataset.
+- `push`: update, commit, and push the current task project's JSON dataset.
+- `mtg`: add a meeting note to the current task project's JSON dataset.
+- `def`: update current project actor identity and legacy target settings.
 - `help`: summarize available protocol commands.
-
-## /ocb def
-
-Use when setting the local OpenCollab target.
-
-Required or inferable details:
-
-- local target repo folder, for example `../DemoOpenColl2`
-- target GitHub repo, for example `innoqiu/DemoOpenColl2`
-- task brief file or URL, for example `TASK_BRIEF.md`
-- actor id, signature, and color
-
-Agent steps:
-
-1. If the target repo folder does not exist, clone or ask permission to clone it.
-2. Save the local target pointer with:
-
-   ```bash
-   npm run ocb -- def --project-dir=<folder> --repo=<owner/repo> --brief=<brief-file> --actor=<id> --signature=<text> --color=<hex>
-   ```
-
-3. If target `opencollab/Task_Status.json` exists, update only workspace and
-   actor identity fields.
-4. Do not create timeline events for identity-only changes.
 
 ## /ocb init
 
-Use when the target task repo has a brief but may not have an OpenCollab JSON
-dataset yet.
+Use when starting a new task project or onboarding a GitHub task repo.
+
+Required or inferable details:
+
+- GitHub task repo URL, for example `https://github.com/innoqiu/DemoOpenColl2.git`
+- optional member list
+- optional actor id, signature, and color
 
 Agent steps:
 
-1. Resolve or clone the target task repo.
-2. Read the target task brief from the provided GitHub link or local file.
-3. Read target `opencollab/Task_Status.json` if it already exists.
-4. Use Prompt A plus the task interface framework.
-5. Decompose the brief into minimal task interfaces.
-6. Infer dependency, boundary, and sync links.
-7. Write target `opencollab/TTask_Status.json` as the tiny brief summary.
-8. Write target `opencollab/Task_Status.json` as the full visual state.
-9. Copy or write target `opencollab/Task_Status.schema.json` if helpful for
-   validation.
-10. Start the local board with:
+1. Read the first-run files in the parent OpenCollab repo.
+2. If a repo URL is provided, run:
 
-    ```bash
-    npm run ocb -- init --project-dir=<folder>
-    ```
+   ```bash
+   npm run ocb -- init <repo-url>
+   ```
 
-11. Tell the user the local URL.
+3. The helper clones or updates the repo into `tasks/<owner>__<repo>`.
+4. If the task folder does not contain `TASK_BRIEF.md`, the helper creates a
+   starter brief and the agent must ask the user to confirm the actual task.
+5. If JSON files are missing, the helper initializes:
+   - `opencollab/TTask_Status.json`
+   - `opencollab/Task_Status.json`
+   - `opencollab/Task_Status.schema.json`
+6. The helper writes thin task-folder entry files:
+   - `AGENTS.md`
+   - `CLAUDE.md`
+   - `.claude/commands/ocb.md`
+7. Read the task brief and use Prompt A plus the task interface framework.
+8. Decompose the brief into minimal task interfaces.
+9. Infer dependency, boundary, and sync links.
+10. Update the task folder's `opencollab/TTask_Status.json` and
+    `opencollab/Task_Status.json`.
+11. Tell the user the task folder path and local board URL.
+
+## /ocb run
+
+Use when the current task project is already configured and the user only wants
+to open the visual board.
+
+Helper:
+
+```bash
+npm run ocb -- run
+```
+
+If no project is configured, ask for a GitHub task repo URL and run `/ocb init`
+instead.
+
+## /ocb list
+
+Show all locally registered task projects:
+
+```bash
+npm run ocb -- list
+```
+
+Use this before switching if the user does not name the exact project id.
+
+## /ocb use
+
+Switch the current task project:
+
+```bash
+npm run ocb -- use <project-id>
+```
+
+After switching, re-read that task folder's `Task_Status.json` before making
+claims, progress changes, conflict analysis, pull, or push decisions.
+
+## /ocb def
+
+Legacy command for updating the current project pointer and actor identity.
+Prefer `/ocb init <repo-url>` for first setup.
+
+Agent behavior:
+
+1. Resolve or create the local task project folder.
+2. Save the local current-project pointer.
+3. If the task status file exists, update `workspace.currentActorId` and the
+   matching `members[]` record.
+4. Do not create timeline events for identity-only changes.
 
 ## /ocb pull
 
-Use when a teammate may have pushed updates to the target repo.
+Use when a teammate may have pushed updates to the current task project.
 
 Agent steps:
 
-1. Check local dirty state in the target repo.
-2. Run `git pull --ff-only` in the target repo.
+1. Check local dirty state in the current task folder.
+2. Run `git pull --ff-only` in that task folder.
 3. If Git cannot fast-forward, stop and explain the files that need resolution.
-4. Re-read target `opencollab/Task_Status.json`.
+4. Re-read `opencollab/Task_Status.json`.
 5. Summarize changed claims, progress, conflicts, and meeting notes.
 6. Do not create a visible timeline event for a clean pull.
+
+Helper:
+
+```bash
+npm run ocb -- pull
+```
 
 ## /ocb push
 
@@ -128,27 +182,24 @@ published.
 
 Agent steps:
 
-1. Pull the target repo first unless local state makes that unsafe.
-2. Inspect target repo changes and local OpenCollab UI changes.
+1. Pull the current task folder first unless local state makes that unsafe.
+2. Inspect local work and OpenCollab UI changes.
 3. Map evidence to task interfaces through `touches[]`, `interfaces.inputs`,
    and `interfaces.outputs`.
-4. Update only the target repo JSON dataset.
+4. Update only the current task folder's JSON dataset.
 5. Recompute conflicts from active interdependence and shared touched files.
-6. Append exactly one visible target `timeline[]` event of type `update`.
-7. Validate or sanity-check target `opencollab/Task_Status.json`.
-8. Commit only the target repo's OpenCollab JSON dataset, normally
+6. Append exactly one visible `timeline[]` event of type `update`.
+7. Validate or sanity-check `opencollab/Task_Status.json`.
+8. Commit only the current task folder's OpenCollab JSON dataset, normally
    `opencollab/*.json`.
-9. Push the target repo.
+9. Push the current task repo.
 10. Tell the user what changed and whether any conflicts need attention.
 
-The helper script may be used for mechanical pieces:
+Helper:
 
 ```bash
 npm run ocb -- push
 ```
-
-The helper stages JSON files in the configured target repo. It does not stage or
-push OpenCollab software files.
 
 ## /ocb mtg
 
@@ -158,13 +209,13 @@ Agent steps:
 
 1. Ask for a title and notes if they are missing.
 2. Identify related task ids.
-3. Add a target `meetings[]` record.
-4. Add one target `timeline[]` event of type `meeting`.
+3. Add a `meetings[]` record.
+4. Add one `timeline[]` event of type `meeting`.
 5. If a conflict is resolved, mark it resolved and describe the decision.
 
-## Target Repo Minimal Shape
+## Task Folder Minimal Shape
 
-A target repo can be as small as:
+A task folder can be as small as:
 
 ```text
 TASK_BRIEF.md
@@ -174,4 +225,4 @@ opencollab/Task_Status.schema.json
 ```
 
 Only `TASK_BRIEF.md` is required before `/ocb init`. The JSON files are produced
-or updated by the agent.
+or updated by the agent and helper.

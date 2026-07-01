@@ -12,6 +12,7 @@ const framework = fs.readFileSync("opencollab/INTERDEPENDENCE_CONFLICT_FRAMEWORK
 const prompts = fs.readFileSync("opencollab/PROMPTS.md", "utf8");
 const protocol = fs.readFileSync("opencollab/PROTOCOL_COMMANDS.md", "utf8");
 const projectConfig = fs.readFileSync("scripts/project-config.mjs", "utf8");
+const ocb = fs.readFileSync("scripts/ocb.mjs", "utf8");
 const viteConfig = fs.readFileSync("vite.config.js", "utf8");
 const board = status.view?.board ?? { cols: 14, rows: 12 };
 
@@ -61,7 +62,15 @@ assert(Boolean(schema.properties.links.items.properties.info), "schema does not 
 
 assert(projectConfig.includes("current-project.json"), "project config should persist the local target pointer");
 assert(projectConfig.includes("OCB_PROJECT_DIR"), "project config should support external target project dirs");
+assert(projectConfig.includes("projects.json"), "project config should persist the local project registry");
+assert(projectConfig.includes("TASKS_DIR"), "project config should define the local tasks workspace");
+assert(projectConfig.includes("parseRepoInput"), "project config should parse GitHub task repo URLs");
+assert(ocb.includes("writeThinProtocolFiles"), "init should write thin task-folder agent entry files");
+assert(ocb.includes("listRegisteredProjects"), "helper should list registered task projects");
+assert(ocb.includes("findRegisteredProject"), "helper should switch between registered task projects");
 assert(viteConfig.includes("resolveProjectConfig"), "local API should resolve the configured target project");
+assert(viteConfig.includes("/api/projects"), "local API should expose registered task projects");
+assert(viteConfig.includes("/api/project/use"), "local API should support project switching");
 assert(viteConfig.includes("collectJsonDataset"), "push endpoint should stage only JSON dataset files");
 assert(projectConfig.includes("opencollab/Task_Status.json"), "project config should default to target opencollab/Task_Status.json");
 
@@ -96,11 +105,12 @@ assert(css.includes(".progress-control") && css.includes(".segmented-progress"),
 assert(framework.includes("The I-TAC-C Check"), "interdependence framework should define the I-TAC-C check");
 assert(framework.includes("Conflict Triggers"), "conflict framework should define conflict triggers");
 assert(prompts.includes("Prompt A: `/ocb init`"), "prompt library should define /ocb init prompt");
-assert(prompts.includes("target task repo"), "prompt library should be target-repo oriented");
+assert(prompts.includes("current task project folder"), "prompt library should be task-folder oriented");
 assert(prompts.includes('"taskInterfaces"'), "prompt library should require structured task interface output");
-assert(agent.includes("target task repo"), "agent prompt should be target-repo oriented");
+assert(agent.includes("task folder"), "agent prompt should be task-folder oriented");
 assert(agent.includes("### /ocb init"), "agent prompt should document /ocb init");
-assert(protocol.includes("Separation Of Repos"), "protocol should define tool repo vs target repo separation");
+assert(protocol.includes("Repo Model"), "protocol should define parent tool repo vs task project folders");
+assert(protocol.includes("/ocb use"), "protocol should define task project switching");
 assert(protocol.includes("opencollab/*.json"), "protocol should limit ordinary push to target JSON datasets");
 
 if (failures.length) {

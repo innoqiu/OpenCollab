@@ -550,7 +550,8 @@ function App() {
 }
 
 function Header({ actor, dirty, meta, status, toast, onAgentPush, onGitPull, onRefresh, onSync }) {
-  const projectLine = meta?.repo || status.workspace.repo || "local project";
+  const projectLine = meta?.projectName || status.workspace.name || "local project";
+  const repoLine = meta?.repo || status.workspace.repo || meta?.projectId || "local";
   const fileLine = meta?.statusFile || status.workspace.statusFile || "opencollab/Task_Status.json";
   return (
     <header className="oc-header">
@@ -559,13 +560,14 @@ function Header({ actor, dirty, meta, status, toast, onAgentPush, onGitPull, onR
         <div>
           <h1>{status.workspace.name}</h1>
           <p>
-            {projectLine} / {status.workspace.branch} / {fileLine}
+            {projectLine} / {repoLine} / {fileLine}
           </p>
         </div>
       </div>
 
       <div className="command-strip" aria-label="OpenCollab commands">
         <span>/ocb init</span>
+        <span>/ocb use</span>
         <span>/ocb pull</span>
         <span>/ocb push</span>
         <span>/ocb mtg</span>
