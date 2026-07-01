@@ -1400,9 +1400,25 @@ async function api(path, options = {}) {
   });
   const payload = await response.json();
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error ?? `OpenCollab API failed: ${path}`);
+    const error = new Error(formatApiError(payload, path));
+    error.payload = payload;
+    throw error;
   }
   return payload;
+}
+
+function formatApiError(payload, path) {
+  const lines = [payload.error ?? `OpenCollab API failed: ${path}`];
+  if (payload.details) lines.push(payload.details);
+  if (Array.isArray(payload.files) && payload.files.length) {
+    lines.push(`Files: ${payload.files.join(", ")}`);
+  }
+  if (Array.isArray(payload.nextSteps) && payload.nextSteps.length) {
+    lines.push(`Next: ${payload.nextSteps.join(" ")}`);
+  }
+  if (payload.stderr) lines.push(payload.stderr.trim());
+  if (payload.stdout) lines.push(payload.stdout.trim());
+  return lines.filter(Boolean).join("\n");
 }
 
 function makeTimelineEvent({ type, actorId, taskIds, title, details, adds }) {

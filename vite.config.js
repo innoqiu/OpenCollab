@@ -256,11 +256,16 @@ function appendPushUpdate(status) {
 }
 
 async function runGit(args, config) {
-  const { stdout, stderr } = await execFileAsync("git", args, {
-    cwd: config.projectRoot,
-    timeout: 30000
-  });
-  return { stdout, stderr };
+  try {
+    const { stdout, stderr } = await execFileAsync("git", args, {
+      cwd: config.projectRoot,
+      timeout: 30000
+    });
+    return { stdout, stderr };
+  } catch (error) {
+    error.gitArgs = args;
+    throw error;
+  }
 }
 
 function projectMeta(config) {
@@ -298,6 +303,130 @@ async function collectJsonDataset(config) {
     if (error.code !== "ENOENT") throw error;
   }
   return [...files].filter(Boolean);
+}
+
+async function trackedLocalChanges(config) {
+  const { stdout } = await runGit(["status", "--porcelain"], config);
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("??"))
+    .map((line) => ({
+      status: line.slice(0, 2),
+      file: line.slice(3).trim()
+    }));
+}
+
+async function branchDivergence(config) {
+  await runGit(["fetch"], config);
+  const { stdout } = await runGit(["rev-list", "--left-right", "--count", "HEAD...@{u}"], config);
+  const [ahead = 0, behind = 0] = stdout
+    .trim()
+    .split(/\s+/)
+    .map((value) => Number(value));
+  return { ahead, behind };
+}
+
+function localChangesPullPayload(config, changes, divergence = {}) {
+  const files = changes.map((change) => change.file);
+  return {
+    ok: false,
+    code: "LOCAL_CHANGES_BLOCK_PULL",
+    error: "Pull stopped because this task folder has local changes.",
+    details:
+      "Git refused to pull because remote updates may overwrite local files in this workspace. Decide whether these local JSON changes should be published or discarded before pulling again.",
+    files,
+    divergence,
+    nextSteps: [
+      "If these changes are real work: click Sync, then Push JSON, then Pull JSON again.",
+      "If this workspace should only receive the latest remote state: discard or stash the listed local files, then Pull JSON again.",
+      `Task folder: ${config.projectRoot}`
+    ]
+  };
+}
+
+function divergedBranchPayload(config, divergence, action) {
+  return {
+    ok: false,
+    code: "BRANCH_DIVERGED",
+    error: `${action} stopped because this task folder and GitHub both have different commits.`,
+    details:
+      "This happens when two local OpenCollab workspaces push or commit against the same task repo before one of them has pulled the other's update. A fast-forward pull cannot combine those histories.",
+    divergence,
+    nextSteps: [
+      "If this workspace has work you want to keep: open the task folder in Git and run git pull --rebase, resolve any JSON conflict, then push again.",
+      "If this workspace is only a test copy: discard/reset this task folder to origin/main, then pull again.",
+      `Task folder: ${config.projectRoot}`
+    ]
+  };
+}
+
+function remoteAheadPushPayload(config, divergence) {
+  return {
+    ok: false,
+    code: "REMOTE_AHEAD_BLOCK_PUSH",
+    error: "Push stopped because GitHub already has newer task JSON updates.",
+    details:
+      "Another workspace pushed to this task repo first. Pull the remote update before publishing from this workspace, otherwise your push would overwrite or fork the task history.",
+    divergence,
+    nextSteps: [
+      "Click Pull JSON if this workspace has no local task edits.",
+      "If Pull JSON says branches diverged, keep both versions by rebasing/merging in the task folder, or reset this test workspace to origin/main.",
+      `Task folder: ${config.projectRoot}`
+    ]
+  };
+}
+
+function gitFailurePayload(error) {
+  const text = [error.message, error.stderr, error.stdout].filter(Boolean).join("\n");
+  if (/non-fast-forward|failed to push some refs|tip of your current branch is behind/i.test(text)) {
+    return {
+      ok: false,
+      code: "PUSH_REJECTED_NON_FAST_FORWARD",
+      error: "Push rejected because GitHub has newer commits.",
+      details:
+        "Another workspace pushed first. This workspace must integrate the remote update before it can push.",
+      nextSteps: [
+        "Try Pull JSON first.",
+        "If Pull JSON reports diverging branches, run git pull --rebase in the task folder and resolve the JSON conflict, or reset this test workspace to origin/main."
+      ],
+      stderr: error.stderr,
+      stdout: error.stdout
+    };
+  }
+  if (/Diverging branches|Not possible to fast-forward|fatal: Not possible to fast-forward/i.test(text)) {
+    return {
+      ok: false,
+      code: "PULL_REJECTED_DIVERGED",
+      error: "Pull stopped because the local and remote branches diverged.",
+      details:
+        "Both this workspace and GitHub have commits the other side does not have. Fast-forward pull cannot combine them.",
+      nextSteps: [
+        "Keep both: run git pull --rebase in the task folder, resolve JSON conflicts, then Push JSON.",
+        "Discard this test copy: reset the task folder to origin/main, then Pull JSON again."
+      ],
+      stderr: error.stderr,
+      stdout: error.stdout
+    };
+  }
+  if (/Your local changes.*would be overwritten|Please commit your changes or stash them/i.test(text)) {
+    return {
+      ok: false,
+      code: "LOCAL_CHANGES_BLOCK_PULL",
+      error: "Pull stopped because local files would be overwritten.",
+      details: "Commit, push, stash, or discard the local task JSON changes before pulling.",
+      stderr: error.stderr,
+      stdout: error.stdout
+    };
+  }
+  return {
+    ok: false,
+    code: "GIT_COMMAND_FAILED",
+    error: error.message,
+    stderr: error.stderr,
+    stdout: error.stdout
+  };
 }
 
 function localApiPlugin() {
@@ -369,6 +498,16 @@ function localApiPlugin() {
 
           if (req.method === "POST" && url.pathname === "/api/git/pull") {
             const config = await resolveProjectConfig();
+            const divergence = await branchDivergence(config);
+            if (divergence.ahead > 0 && divergence.behind > 0) {
+              json(res, 409, divergedBranchPayload(config, divergence, "Pull"));
+              return;
+            }
+            const localChanges = await trackedLocalChanges(config);
+            if (localChanges.length) {
+              json(res, 409, localChangesPullPayload(config, localChanges, divergence));
+              return;
+            }
             const result = await runGit(["pull", "--ff-only"], config);
             const { status, meta } = await readStatus();
             json(res, 200, { ok: true, result, status, meta });
@@ -377,6 +516,15 @@ function localApiPlugin() {
 
           if (req.method === "POST" && url.pathname === "/api/git/push") {
             const config = await resolveProjectConfig();
+            const divergence = await branchDivergence(config);
+            if (divergence.ahead > 0 && divergence.behind > 0) {
+              json(res, 409, divergedBranchPayload(config, divergence, "Push"));
+              return;
+            }
+            if (divergence.behind > 0) {
+              json(res, 409, remoteAheadPushPayload(config, divergence));
+              return;
+            }
             const body = await readBody(req);
             const currentRead = await readStatus();
             const draft = body.status ?? currentRead.status;
@@ -395,12 +543,13 @@ function localApiPlugin() {
 
           json(res, 404, { ok: false, error: "Unknown OpenCollab API route" });
         } catch (error) {
-          json(res, 500, {
+          const payload = error.gitArgs ? gitFailurePayload(error) : {
             ok: false,
             error: error.message,
             stdout: error.stdout,
             stderr: error.stderr
-          });
+          };
+          json(res, payload.code ? 409 : 500, payload);
         }
       });
     }

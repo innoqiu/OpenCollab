@@ -75,6 +75,9 @@ assert(viteConfig.includes("resolveProjectConfig"), "local API should resolve th
 assert(viteConfig.includes("/api/projects"), "local API should expose registered task projects");
 assert(viteConfig.includes("/api/project/use"), "local API should support project switching");
 assert(viteConfig.includes("collectJsonDataset"), "push endpoint should stage only JSON dataset files");
+assert(viteConfig.includes("BRANCH_DIVERGED"), "local API should explain diverged Git branches");
+assert(viteConfig.includes("REMOTE_AHEAD_BLOCK_PUSH"), "local API should preflight remote-ahead pushes");
+assert(viteConfig.includes("LOCAL_CHANGES_BLOCK_PULL"), "local API should explain local changes before pull");
 assert(projectConfig.includes("opencollab/Task_Status.json"), "project config should default to target opencollab/Task_Status.json");
 
 assert(app.includes("Project JSON is rendered"), "UI should describe the configured project JSON");
@@ -96,6 +99,7 @@ assert(app.includes("ProgressControl") && app.includes("onProgressChange"), "pro
 assert(app.includes("\"--tile-opacity\": tileOpacity(progress)"), "task tile opacity is not driven by progress");
 assert(app.includes("const width = 1;") && app.includes("gridIsOpen(candidate, occupied)"), "UI should normalize imported tasks to one grid cell");
 assert(app.includes("Local changes pending sync"), "unsynced indicator should use professional English copy");
+assert(app.includes("formatApiError"), "UI should format structured API errors");
 assert(app.includes("/ocb init"), "UI command strip should use /ocb init");
 assert(!app.includes("Create link") && !app.includes("connectSource"), "old create-link flow should be removed");
 assert(!app.includes(">Active</button>") && !app.includes("Mark Active"), "old active buttons should be removed");
@@ -105,6 +109,7 @@ assert(css.includes(".task-tile.related-highlight"), "related highlight style is
 assert(!css.includes("stroke-dasharray") && !css.includes(".board-link"), "dashed link styling should not remain in the matrix UI");
 assert(css.includes(".task-tile.state-active"), "active state style is missing");
 assert(css.includes(".progress-control") && css.includes(".segmented-progress"), "progress slider styles are missing");
+assert(css.includes("white-space: pre-wrap"), "error toast should show full multi-line Git guidance");
 
 assert(framework.includes("The I-TAC-C Check"), "interdependence framework should define the I-TAC-C check");
 assert(framework.includes("Conflict Triggers"), "conflict framework should define conflict triggers");
